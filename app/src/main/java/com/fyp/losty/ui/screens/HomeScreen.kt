@@ -62,6 +62,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.res.painterResource
 import com.fyp.losty.R
+import androidx.compose.ui.graphics.vector.ImageVector
 
 @Composable
 fun HomeScreen(navController: NavController, appNavController: NavController) {
@@ -110,8 +111,7 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
                     "home" -> navController.navigate("home")
                     "chat" -> navController.navigate("conversations")
                     "add" -> appNavController.navigate("create_post")
-                    "inventory" -> navController.navigate("inventory")
-                    "manage_claims" -> navController.navigate("manage_active_claims")
+                    "notifications" -> navController.navigate("manage_active_claims")
                     "profile" -> navController.navigate("profile")
                 }
             })
@@ -367,14 +367,14 @@ private fun PostCard(post: HomePost, navController: NavController) {
                 }
             }
             Text(text = "$likeCount likes", color = TextBlack, fontWeight = FontWeight.Bold)
-            buildCaption(post.username, post.caption)
+            BuildCaption(post.username, post.caption)
             Text(text = post.timestamp, color = TextGrey, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
-private fun buildCaption(username: String, caption: String) {
+private fun BuildCaption(username: String, caption: String) {
     Row {
         Text(text = username, fontWeight = FontWeight.Bold, color = TextBlack)
         Spacer(modifier = Modifier.width(6.dp))
@@ -388,8 +388,7 @@ private fun BottomNavigationBar(selectedRoute: String, onItemSelected: (String) 
         BottomNavItem("home", Icons.Filled.Home, "Home"),
         BottomNavItem("chat", Icons.AutoMirrored.Filled.Chat, "Chat"),
         BottomNavItem("add", Icons.Outlined.Add, "Add"),
-        BottomNavItem("inventory", icon = null, label = "My Inventory"),
-        BottomNavItem("manage_claims", icon = null, label = "Manage Claims"),
+        BottomNavItem("notifications", Icons.Filled.Notifications, "Notifications"),
         BottomNavItem("profile", Icons.Filled.Person, "Profile")
     )
 
@@ -401,26 +400,12 @@ private fun BottomNavigationBar(selectedRoute: String, onItemSelected: (String) 
                 selected = isSelected,
                 onClick = { onItemSelected(item.route) },
                 icon = {
-                    if (item.icon != null) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = ElectricPink,
-                            modifier = Modifier.graphicsLayer(scaleX = iconScale, scaleY = iconScale)
-                        )
-                    } else {
-                        val painterId = when (item.route) {
-                            "inventory" -> R.drawable.outline_inventory_2_24
-                            "manage_claims" -> R.drawable.outline_list_alt_check_24
-                            else -> R.drawable.outline_inventory_2_24
-                        }
-                        Icon(
-                            painter = painterResource(id = painterId),
-                            contentDescription = item.label,
-                            tint = ElectricPink,
-                            modifier = Modifier.graphicsLayer(scaleX = iconScale, scaleY = iconScale)
-                        )
-                    }
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        tint = ElectricPink,
+                        modifier = Modifier.graphicsLayer(scaleX = iconScale, scaleY = iconScale)
+                    )
                 },
                 label = {
                     Text(
@@ -434,4 +419,4 @@ private fun BottomNavigationBar(selectedRoute: String, onItemSelected: (String) 
     }
 }
 
-private data class BottomNavItem(val route: String, val icon: androidx.compose.ui.graphics.vector.ImageVector?, val label: String)
+private data class BottomNavItem(val route: String, val icon: ImageVector, val label: String)
