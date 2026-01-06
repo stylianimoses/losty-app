@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "1035581628256",
+    "firebase_url": "https://losty-af744-default-rtdb.asia-southeast1.firebasedatabase.app",
     "project_id": "losty-af744",
     "storage_bucket": "losty-af744.firebasestorage.app"
   },
@@ -12,7 +13,28 @@
           "package_name": "com.fyp.losty"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1035581628256-5lpqrqv11b7kfsiie0u58dv1ucv6mjt3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyp.losty",
+            "certificate_hash": "e35c62bbef4cb470cee4f393b48fbf751ba5eb3e"
+          }
+        },
+        {
+          "client_id": "1035581628256-hhb06n4jsjrpbrt6a9acfotuk9v0rapq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fyp.losty",
+            "certificate_hash": "af4c001801bd89b5e57ab82c69842e52d6896c12"
+          }
+        },
+        {
+          "client_id": "1035581628256-r3gdpsuferqnonflfuckme3fajdeu5ld.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDOgizNtvyZqyj_Q5-PFVAOiurwhZ7NfAY"
@@ -20,7 +42,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1035581628256-r3gdpsuferqnonflfuckme3fajdeu5ld.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

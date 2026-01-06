@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.LOSTY" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- App theme should inherit from Material Components so attributes like colorControlNormal resolve -->
+    <style name="Theme.LOSTY" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorControlNormal">@color/colorControlNormal</item>
+        <!-- You can add other theme attributes here (primary, secondary, etc.) -->
+    </style>
 </resources>

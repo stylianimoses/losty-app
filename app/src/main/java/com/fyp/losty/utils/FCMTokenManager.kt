@@ -1,7 +1,7 @@
 package com.fyp.losty.utils
 
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.tasks.await
 
@@ -10,33 +10,28 @@ import kotlinx.coroutines.tasks.await
  * Call saveUserFCMToken() when the user logs in or when the token is refreshed
  */
 object FCMTokenManager {
-    
+
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
-    private val messaging: FirebaseMessaging = FirebaseMessaging.getInstance()
-    
+    private val realtime = FirebaseDatabase.getInstance().reference
+    // Do not cache a FirebaseMessaging instance (it holds a Context). Get it inside suspending function.
+
     /**
-     * Retrieves the device's FCM token and updates the corresponding user document
-     * in the users collection with the fcmToken field.
-     * 
-     * @param userId The ID of the user (typically from FirebaseAuth.currentUser?.uid)
+     * Retrieves the device's FCM token and updates the corresponding user record
+     * in the Realtime Database at /Users/{userId}/fcmToken
      */
     suspend fun saveUserFCMToken(userId: String) {
         try {
             // Get the FCM token for this device
-            val token = messaging.token.await()
-            
-            // Update the user document in Firestore with the FCM token
-            firestore.collection("users")
-                .document(userId)
-                .update("fcmToken", token)
-                .await()
+            val token = FirebaseMessaging.getInstance().token.await()
+
+            // Update the user node in Realtime Database with the FCM token
+            realtime.child("Users").child(userId).child("fcmToken").setValue(token).await()
         } catch (e: Exception) {
-            // Handle error - token retrieval or Firestore update failed
+            // Propagate the error to callers
             throw Exception("Failed to save FCM token: ${e.message}", e)
         }
     }
-    
+
     /**
      * Convenience function that uses the current authenticated user
      */
@@ -49,7 +44,3 @@ object FCMTokenManager {
         }
     }
 }
-
-
-
-

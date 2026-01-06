@@ -1,19 +1,44 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
+<?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Shared preferences: broadly include, then exclude sensitive tokens -->
+        <include domain="sharedpref" path="."/>
+        <exclude domain="sharedpref" path="auth_tokens.xml"/>
+        <exclude domain="sharedpref" path="secure_prefs.xml"/>
+        <!-- Optionally, explicitly include key prefs file -->
+        <include domain="sharedpref" path="user_prefs.xml"/>
+
+        <!-- Databases: include main app data, exclude journals/WAL -->
+        <include domain="database" path="app.db"/>
+        <exclude domain="database" path="app.db-journal"/>
+        <exclude domain="database" path="app.db-wal"/>
+
+        <!-- Internal files: broadly include, then exclude cache and logs; keep user data -->
+        <include domain="file" path="."/>
+        <exclude domain="file" path="cache/"/>
+        <exclude domain="file" path="files/logs/"/>
+        <include domain="file" path="files/user/"/>
+
+        <!-- External files (if used): include exported user content -->
+        <include domain="external" path="Android/data/${applicationId}/files/exports/"/>
     </cloud-backup>
-    <!--
+
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <!-- Mirror the backup rules for device-to-device transfer -->
+        <include domain="sharedpref" path="."/>
+        <exclude domain="sharedpref" path="auth_tokens.xml"/>
+        <exclude domain="sharedpref" path="secure_prefs.xml"/>
+        <include domain="sharedpref" path="user_prefs.xml"/>
+
+        <include domain="database" path="app.db"/>
+        <exclude domain="database" path="app.db-journal"/>
+        <exclude domain="database" path="app.db-wal"/>
+
+        <include domain="file" path="."/>
+        <exclude domain="file" path="cache/"/>
+        <exclude domain="file" path="files/logs/"/>
+        <include domain="file" path="files/user/"/>
+
+        <include domain="external" path="Android/data/${applicationId}/files/exports/"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

@@ -4,6 +4,9 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,9 +17,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fyp.losty.AppViewModel
-import com.fyp.losty.Claim
 import com.fyp.losty.MyClaimsState
 
+
+@OptIn(androidx.compose.material.ExperimentalMaterialApi::class)
 @Composable
 fun ManagePostClaimsScreen(appViewModel: AppViewModel = viewModel()) {
     val claimsState by appViewModel.claimsForMyPostsState.collectAsState()
@@ -27,7 +31,15 @@ fun ManagePostClaimsScreen(appViewModel: AppViewModel = viewModel()) {
         appViewModel.loadClaimsForMyPosts()
     }
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    val isRefreshing = claimsState is MyClaimsState.Loading
+    val pullRefreshState = rememberPullRefreshState(isRefreshing, onRefresh = { appViewModel.loadClaimsForMyPosts() })
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pullRefresh(pullRefreshState),
+        contentAlignment = Alignment.Center
+    ) {
         when (val state = claimsState) {
             is MyClaimsState.Loading -> {
                 CircularProgressIndicator()
@@ -92,5 +104,7 @@ fun ManagePostClaimsScreen(appViewModel: AppViewModel = viewModel()) {
                 Text(text = "Error: ${state.message}")
             }
         }
+
+        PullRefreshIndicator(isRefreshing, pullRefreshState, Modifier.align(Alignment.TopCenter))
     }
 }

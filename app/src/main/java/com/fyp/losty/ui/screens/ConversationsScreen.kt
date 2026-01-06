@@ -1,13 +1,23 @@
 package com.fyp.losty.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -19,9 +29,12 @@ import coil.compose.AsyncImage
 import com.fyp.losty.AppViewModel
 import com.fyp.losty.Conversation
 import com.fyp.losty.ConversationsState
+import com.fyp.losty.ui.components.BackToHomeButton
+import com.fyp.losty.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.material.ExperimentalMaterialApi::class)
 @Composable
 fun ConversationsScreen(
     navController: NavController,
@@ -35,147 +48,169 @@ fun ConversationsScreen(
         appViewModel.loadConversations()
     }
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        when (val state = conversationsState) {
-            is ConversationsState.Loading -> {
-                CircularProgressIndicator()
-            }
-            is ConversationsState.Success -> {
-                if (state.conversations.isEmpty()) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(text = "Messages", fontWeight = FontWeight.Bold, color = TextBlack) },
+                navigationIcon = { BackToHomeButton(navController = navController) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = OffWhite)
+            )
+        },
+        containerColor = OffWhite
+    ) { paddingValues ->
+        val isRefreshing = conversationsState is ConversationsState.Loading
+        val pullRefreshState = rememberPullRefreshState(isRefreshing, onRefresh = { appViewModel.loadConversations() })
+
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)
+            .pullRefresh(pullRefreshState)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // --- NEW FUNCTION: Search Bar (Integrated into Original Theme) ---
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White, // White bar on OffWhite background
+                    shadowElevation = 2.dp
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     ) {
-                        Text(
-                            text = "No messages yet",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Start a conversation by messaging someone from their post",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Icon(Icons.Default.Search, contentDescription = "Search", tint = TextGrey)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Search chats...", color = TextGrey, fontSize = 15.sp)
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(state.conversations) { conversation ->
-                            ConversationItem(
-                                conversation = conversation,
-                                currentUserId = currentUserId,
-                                onClick = {
-                                    navController.navigate("chat/${conversation.id}")
+                }
+
+                // Chat List
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    when (val state = conversationsState) {
+                        is ConversationsState.Loading -> CircularProgressIndicator(color = ElectricPink)
+                        is ConversationsState.Success -> {
+                            if (state.conversations.isEmpty()) {
+                                Text("No messages yet", color = TextGrey)
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(state.conversations) { conversation ->
+                                        // Maintained "Card" Design but updated content
+                                        ConversationCard(
+                                            conversation = conversation,
+                                            currentUserId = currentUserId,
+                                            onClick = { navController.navigate("chat/${conversation.id}") }
+                                        )
+                                    }
                                 }
-                            )
+                            }
                         }
+                        is ConversationsState.Error -> Text("Error: ${state.message}", color = Color.Red)
                     }
                 }
             }
-            is ConversationsState.Error -> {
-                Text(text = "Error: ${state.message}")
-            }
+
+            PullRefreshIndicator(isRefreshing, pullRefreshState, Modifier.align(Alignment.TopCenter))
         }
     }
 }
 
 @Composable
-fun ConversationItem(
+fun ConversationCard(
     conversation: Conversation,
     currentUserId: String,
     onClick: () -> Unit
 ) {
-    // Determine the other user's name
-    val otherUserName = if (currentUserId == conversation.participant1Id) {
-        conversation.participant2Name
-    } else {
-        conversation.participant1Name
-    }
+    val otherUserName = if (currentUserId == conversation.participant1Id) conversation.participant2Name else conversation.participant1Name
+
+    // --- NEW FUNCTION: Unread Logic ---
+    val isUnread = conversation.unreadCount > 0
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Post image thumbnail
-            if (conversation.postImageUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = conversation.postImageUrl,
-                    contentDescription = "Post image",
-                    modifier = Modifier
-                        .size(60.dp),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("No Image")
+            // Avatar / Post Context
+            Surface(
+                modifier = Modifier.size(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFF0F0F0)
+            ) {
+                if (conversation.postImageUrl.isNotEmpty()) {
+                    AsyncImage(model = conversation.postImageUrl, contentDescription = null, contentScale = ContentScale.Crop)
+                } else {
+                    Box(contentAlignment = Alignment.Center) { Text("Img", color = TextGrey, fontSize = 10.sp) }
                 }
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = otherUserName,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = conversation.postTitle,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (conversation.lastMessage.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = conversation.lastMessage,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = otherUserName,
+                        fontSize = 16.sp,
+                        color = TextBlack,
+                        // --- NEW FUNCTION: Bold if unread ---
+                        fontWeight = if (isUnread) FontWeight.ExtraBold else FontWeight.Bold
+                    )
+                    Text(
+                        text = formatTime(conversation.lastMessageTime),
+                        fontSize = 12.sp,
+                        color = if (isUnread) ElectricPink else TextGrey,
+                        fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Normal
                     )
                 }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = conversation.lastMessage.ifEmpty { "Photo sent" },
+                        fontSize = 14.sp,
+                        color = if (isUnread) TextBlack else TextGrey,
+                        fontWeight = if (isUnread) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // --- NEW FUNCTION: Unread Dot ---
+                    if (isUnread) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(ElectricPink) // Brand Color for unread
+                        )
+                    }
+                }
             }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Text(
-                text = formatTime(conversation.lastMessageTime),
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
 
 private fun formatTime(timestamp: Long): String {
-    val now = System.currentTimeMillis()
-    val diff = now - timestamp
-
+    val diff = System.currentTimeMillis() - timestamp
     return when {
-        diff < 60000 -> "Just now"
-        diff < 3600000 -> "${diff / 60000}m ago"
-        diff < 86400000 -> "${diff / 3600000}h ago"
-        diff < 604800000 -> "${diff / 86400000}d ago"
+        diff < 60000 -> "Now"
+        diff < 3600000 -> "${diff / 60000}m"
+        diff < 86400000 -> "${diff / 3600000}h"
         else -> SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(timestamp))
     }
 }
-

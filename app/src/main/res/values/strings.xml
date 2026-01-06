@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">LOSTY</string>
+    <!-- OAuth 2.0 Web client ID from Firebase/Google Cloud console -->
+    <string name="default_web_client_id">1035581628256-hhb06n4jsjrpbrt6a9acfotuk9v0rapq.apps.googleusercontent.com</string>
 </resources>

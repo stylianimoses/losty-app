@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Use the concrete app color resource to avoid resource resolution errors in compile-time checks -->
+    <item android:color="@color/colorControlNormal" />
+</selector>

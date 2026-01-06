@@ -1,8 +1,5 @@
 [versions]
 # Known stable versions that work together
-agp = "8.4.1"
-kotlin = "1.9.23"
-composeCompiler = "1.5.11"
 coreKtx = "1.13.1"
 junit = "4.13.2"
 junitVersion = "1.1.5"
@@ -15,9 +12,12 @@ materialIconsExtended = "1.6.7"
 coil = "2.6.0"
 firebaseBom = "33.0.0"
 lifecycleViewmodel = "2.8.0"
-googleServices = "4.4.1"
 glance = "1.1.0-rc01"
-firebaseDatabase = "22.0.1"
+firebaseMessaging = "23.2.0"
+firebaseAuth = "24.0.1"
+credentials = "1.5.0"
+credentialsPlayServicesAuth = "1.5.0"
+googleid = "1.1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -40,11 +40,21 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
-firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
-firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
-firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
-firebase-storage = { group = "com.google.firebase", name = "firebase-storage" }
-firebase-database = { group = "com.google.firebase", name = "firebase-database", version.ref = "firebaseDatabase" }
+firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging", version.ref = "firebaseMessaging" }
+
+# KTX artifacts (explicit aliases) - added so build.gradle can use catalog entries for ktx variants
+firebase-analytics-ktx = { group = "com.google.firebase", name = "firebase-analytics-ktx" }
+firebase-auth-ktx = { group = "com.google.firebase", name = "firebase-auth-ktx" }
+firebase-firestore-ktx = { group = "com.google.firebase", name = "firebase-firestore-ktx" }
+firebase-storage-ktx = { group = "com.google.firebase", name = "firebase-storage-ktx" }
+# Let the Firebase BoM control the firebase-database-ktx version
+firebase-database-ktx = { group = "com.google.firebase", name = "firebase-database-ktx" }
+firebase-functions-ktx = { group = "com.google.firebase", name = "firebase-functions-ktx" }
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth", version.ref = "firebaseAuth" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
+androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentialsPlayServicesAuth" }
+googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
+
 [plugins]
 
 # NOTE: The [plugins] section has been intentionally removed to resolve build issues.

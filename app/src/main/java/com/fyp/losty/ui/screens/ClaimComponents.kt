@@ -12,20 +12,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import com.fyp.losty.Claim
+import com.fyp.losty.ui.theme.TextBlack
 
 @Composable
 fun ClaimApprovalCard(claim: Claim, onApprove: () -> Unit, onReject: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = Color.White
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "Post: ${claim.postTitle}",
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = TextBlack
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -73,12 +75,16 @@ fun OwnerClaimCard(claim: Claim) {
         else -> Color.Gray
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "Post: ${claim.postTitle}",
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = TextBlack
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -106,9 +112,12 @@ fun ClaimCard(claim: Claim) {
         else -> claim.status.replaceFirstChar { it.uppercase() }
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = claim.postTitle, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(text = claim.postTitle, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextBlack)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Status: $statusText",

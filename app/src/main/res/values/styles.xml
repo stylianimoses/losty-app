@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Alias AppTheme to the Theme.LOSTY we define in themes.xml to avoid unresolved MaterialComponents references -->
+    <style name="AppTheme" parent="Theme.LOSTY" />
+
+</resources>

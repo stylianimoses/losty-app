@@ -13,3 +13,14 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Firebase emulator logs and tokens
+firebase-debug.log
+firestore-debug.log
+.firebase*
+.emulator_console_auth_token
+/functions/node_modules
+
+# IDE and OS files
+.idea/
+*.log

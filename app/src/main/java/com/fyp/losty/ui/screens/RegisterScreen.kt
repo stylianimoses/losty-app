@@ -11,7 +11,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +19,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun RegisterScreen(navController: NavController) {
@@ -34,6 +37,11 @@ fun RegisterScreen(navController: NavController) {
     val isPhoneValid = Patterns.PHONE.matcher(phoneNumber).matches()
     val isPasswordLongEnough = password.length >= 8
     val passwordsMatch = password == confirmPassword
+
+    // Firebase instances (reuse inside onClick)
+    val auth = FirebaseAuth.getInstance()
+    val firestore = FirebaseFirestore.getInstance()
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -117,17 +125,68 @@ fun RegisterScreen(navController: NavController) {
         Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = {
-                // TODO: Add registration logic here
-                navController.navigate("login")
+                val emailInput = email.trim()
+                val phoneInput = phoneNumber.trim()
+                val passwordInput = password.trim()
+                val confirmPasswordInput = confirmPassword.trim()
+
+                // Basic validation
+                if (emailInput.isEmpty() || phoneInput.isEmpty() || passwordInput.isEmpty() || confirmPasswordInput.isEmpty()) {
+                    Toast.makeText(context, "Please fill in all fields", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                if (!Patterns.EMAIL_ADDRESS.matcher(emailInput).matches()) {
+                    Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                if (!Patterns.PHONE.matcher(phoneInput).matches()) {
+                    Toast.makeText(context, "Please enter a valid phone number", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                if (passwordInput.length < 8) {
+                    Toast.makeText(context, "Password must be at least 8 characters", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                if (passwordInput != confirmPasswordInput) {
+                    Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+
+                auth.createUserWithEmailAndPassword(emailInput, passwordInput)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            val userId = auth.currentUser?.uid
+                            if (userId == null) {
+                                Toast.makeText(context, "Registration failed: Missing user ID", Toast.LENGTH_SHORT).show()
+                                return@addOnCompleteListener
+                            }
+                            val user = hashMapOf(
+                                "username" to phoneInput,
+                                "email" to emailInput,
+                                "createdAt" to System.currentTimeMillis()
+                            )
+                            firestore.collection("users").document(userId).set(user)
+                                .addOnSuccessListener {
+                                    Toast.makeText(context, "Registration successful!", Toast.LENGTH_SHORT).show()
+                                    navController.navigate("login")
+                                }
+                                .addOnFailureListener { e ->
+                                    Toast.makeText(context, "Failed to save user data: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                        } else {
+                            val msg = task.exception?.message ?: "Registration failed"
+                            // Friendly handling when email already exists
+                            if (msg.contains("already in use", ignoreCase = true)) {
+                                Toast.makeText(context, "Email already registered. Try signing in or reset your password.", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(context, "Registration failed: $msg", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
             },
-            enabled = isEmailValid && isPhoneValid && isPasswordLongEnough && passwordsMatch,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Register")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        TextButton(onClick = { navController.navigate("login") }) {
-            Text("Already have an account? Login")
         }
     }
 }

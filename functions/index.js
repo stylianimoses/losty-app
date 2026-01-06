@@ -170,24 +170,34 @@ function getGeographicScore(lat1, lon1, lat2, lon2) {
  */
 async function sendMatchNotification(ownerId, lostReportId, foundReportId) {
     try {
-        // Retrieve the FCM token from the user's document
-        const userDoc = await admin.firestore()
-            .collection('users')
-            .doc(ownerId)
-            .get();
-        
-        if (!userDoc.exists) {
-            console.error(`User document not found for ownerId: ${ownerId}`);
-            return;
+        // Try Realtime Database first for fcmToken
+        let fcmToken = null;
+        try {
+            const dbSnap = await admin.database().ref(`Users/${ownerId}/fcmToken`).get();
+            if (dbSnap && dbSnap.exists()) {
+                fcmToken = dbSnap.val();
+            }
+        } catch (dbErr) {
+            console.error(`Error reading fcmToken from Realtime DB for ${ownerId}:`, dbErr);
         }
-        
-        const fcmToken = userDoc.data()?.fcmToken;
-        
+
+        // Fallback to Firestore if not found in Realtime DB
+        if (!fcmToken) {
+            const userDoc = await admin.firestore()
+                .collection('users')
+                .doc(ownerId)
+                .get();
+
+            if (userDoc.exists) {
+                fcmToken = userDoc.data()?.fcmToken;
+            }
+        }
+
         if (!fcmToken) {
             console.error(`FCM token not found for user: ${ownerId}`);
             return;
         }
-        
+
         // Prepare the notification message
         const message = {
             notification: {
@@ -198,11 +208,11 @@ async function sendMatchNotification(ownerId, lostReportId, foundReportId) {
                 type: 'match_found',
                 lostReportId: lostReportId,
                 foundReportId: foundReportId,
-                click_action: 'FLUTTER_NOTIFICATION_CLICK', // Adjust based on your app's needs
+                click_action: 'FLUTTER_NOTIFICATION_CLICK',
             },
             token: fcmToken,
         };
-        
+
         // Send the notification
         const response = await admin.messaging().send(message);
         console.log(`Successfully sent notification to ${ownerId}:`, response);

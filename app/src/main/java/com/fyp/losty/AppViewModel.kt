@@ -17,9 +17,10 @@ import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 // --- DATA CLASSES ---
-data class Post(val id: String = "", val title: String = "", val description: String = "", val category: String = "", val location: String = "", val imageUrls: List<String> = emptyList(), val authorId: String = "", val authorName: String = "", val createdAt: Long = 0L, val status: String = "")
+data class Post(val id: String = "", val title: String = "", val description: String = "", val category: String = "", val location: String = "", val imageUrls: List<String> = emptyList(), val authorId: String = "", val authorName: String = "", val createdAt: Long = 0L, val status: String = "", val type: String = "")
 data class UserProfile(val uid: String = "", val displayName: String = "", val email: String = "", val photoUrl: String = "", val phoneNumber: String = "")
 data class Claim(val id: String = "", val postId: String = "", val postTitle: String = "", val postOwnerId: String = "", val claimerId: String = "", val status: String = "", val claimedAt: Long = 0L)
+// Updated Message Data Class to include conversationId
 data class Message(val id: String = "", val conversationId: String = "", val senderId: String = "", val senderName: String = "", val text: String = "", val timestamp: Long = 0L, val read: Boolean = false)
 data class Conversation(val id: String = "", val postId: String = "", val postTitle: String = "", val postImageUrl: String = "", val participant1Id: String = "", val participant1Name: String = "", val participant2Id: String = "", val participant2Name: String = "", val lastMessage: String = "", val lastMessageTime: Long = 0L, val unreadCount: Int = 0)
 
@@ -51,8 +52,13 @@ class AppViewModel : ViewModel() {
     private val _claimEventChannel = Channel<ClaimEvent>()
     val claimEvents = _claimEventChannel.receiveAsFlow()
 
+    // --- BOOKMARK CACHE ---
+    // Holds the set of postIds the current user has bookmarked
+    val bookmarks = MutableStateFlow<Set<String>>(emptySet())
+
     init {
         loadAllPosts()
+        loadBookmarks()
     }
 
     // --- AUTH ---
@@ -67,7 +73,24 @@ class AppViewModel : ViewModel() {
             firestore.collection("users").document(firebaseUser.uid).set(userMap).await()
             authState.value = AuthState.Success
         } catch (e: Exception) {
-            authState.value = AuthState.Error(e.message ?: "An unknown error occurred")
+            // Handle case where the email is already used by another account and provide guidance
+            if (e is com.google.firebase.auth.FirebaseAuthUserCollisionException) {
+                try {
+                    val methodsResult = auth.fetchSignInMethodsForEmail(email).await()
+                    val methods = methodsResult.signInMethods ?: emptyList()
+                    val suggestion = when {
+                        methods.contains("google.com") -> "Sign in with Google (Google Sign-In) or link providers in account settings."
+                        methods.contains("password") -> "An account exists — try signing in or use 'Forgot password' to reset."
+                        methods.isNotEmpty() -> "This email is already registered with: ${methods.joinToString()}. Try signing in with that provider."
+                        else -> "This email is already registered. Try signing in or reset your password."
+                    }
+                    authState.value = AuthState.Error("The email address is already in use. $suggestion")
+                } catch (inner: Exception) {
+                    authState.value = AuthState.Error("The email address is already in use.")
+                }
+            } else {
+                authState.value = AuthState.Error(e.message ?: "An unknown error occurred")
+            }
         }
     }
 
@@ -101,31 +124,55 @@ class AppViewModel : ViewModel() {
         } catch (e: Exception) { /* Handle error */ }
     }
 
+    fun updateDisplayName(newName: String) = viewModelScope.launch {
+        val user = auth.currentUser ?: run { authState.value = AuthState.Error("Not logged in"); return@launch }
+        try {
+            // Update Firebase Auth profile displayName
+            val profileUpdates = UserProfileChangeRequest.Builder().setDisplayName(newName).build()
+            user.updateProfile(profileUpdates).await()
+
+            // Update Firestore users doc
+            firestore.collection("users").document(user.uid)
+                .update(mapOf("displayName" to newName))
+                .await()
+
+            // Refresh local userProfile state
+            loadUserProfile()
+        } catch (e: Exception) {
+            authState.value = AuthState.Error(e.message ?: "Failed to update name")
+        }
+    }
+
     // --- POSTS ---
-    private fun loadAllPosts() {
-        firestore.collection("posts")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) { 
-                    postFeedState.value = PostFeedState.Error(error.message ?: "")
-                    return@addSnapshotListener 
-                }
-                if (snapshot != null) { 
-                    val allPosts = snapshot.toObjects(Post::class.java).mapIndexed { i, p -> 
-                        p.copy(id = snapshot.documents[i].id) 
-                    }
-                    // Filter out posts with status "claimed" (already claimed items)
-                    val activePosts = allPosts.filter { it.status == "active" }
-                    postFeedState.value = PostFeedState.Success(activePosts)
-                }
+    fun loadAllPosts() = viewModelScope.launch {
+        // Note: We don't set 'Loading' here to avoid flashing the screen
+        try {
+            val snapshot = firestore.collection("posts")
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .get()
+                .await()
+
+            val allPosts = snapshot.toObjects(Post::class.java).mapIndexed { i, p ->
+                p.copy(id = snapshot.documents[i].id)
             }
+            val activePosts = allPosts.filter { it.status == "active" }
+            postFeedState.value = PostFeedState.Success(activePosts)
+        } catch (e: Exception) {
+            postFeedState.value = PostFeedState.Error(e.message ?: "Failed to load posts")
+        }
     }
 
     fun loadMyPosts() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: return@launch
-        firestore.collection("posts").whereEqualTo("authorId", userId).orderBy("createdAt", Query.Direction.DESCENDING).addSnapshotListener { snapshot, error ->
-            if (error != null) { myPostsState.value = PostFeedState.Error(error.message ?: ""); return@addSnapshotListener }
-            if (snapshot != null) { myPostsState.value = PostFeedState.Success(snapshot.toObjects(Post::class.java).mapIndexed { i, p -> p.copy(id = snapshot.documents[i].id) }) }
+        try {
+            val snapshot = firestore.collection("posts")
+                .whereEqualTo("authorId", userId)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .get()
+                .await()
+            myPostsState.value = PostFeedState.Success(snapshot.toObjects(Post::class.java).mapIndexed { i, p -> p.copy(id = snapshot.documents[i].id) })
+        } catch (e: Exception) {
+            myPostsState.value = PostFeedState.Error(e.message ?: "Failed to load my posts")
         }
     }
 
@@ -142,7 +189,26 @@ class AppViewModel : ViewModel() {
         val userId = auth.currentUser?.uid ?: run { createPostState.value = SinglePostState.Error("Not logged in"); return@launch }
         val userName = userProfile.value.displayName
         try {
-            val imageUrls = imageUris.map { storage.reference.child("post_images/${UUID.randomUUID()}").putFile(it).await().storage.downloadUrl.await().toString() }
+            // Step 1: Upload images and build post data (including required "type")
+            val imageUrls = mutableListOf<String>()
+            for (uri in imageUris) {
+                val refPath = "post_images/$userId/${UUID.randomUUID()}"
+                val ref = storage.reference.child(refPath)
+                try {
+                    ref.putFile(uri).await()
+                    val downloadUrl = ref.downloadUrl.await().toString()
+                    imageUrls.add(downloadUrl)
+                } catch (e: Exception) {
+                    val msg = e.message ?: "Upload failed"
+                    if (msg.contains("PERMISSION_DENIED", ignoreCase = true) || msg.contains("permission", ignoreCase = true)) {
+                        createPostState.value = SinglePostState.Error("Permission denied: you don't have access to upload photos")
+                    } else {
+                        createPostState.value = SinglePostState.Error(msg)
+                    }
+                    return@launch
+                }
+            }
+
             val postData = hashMapOf(
                 "title" to title,
                 "description" to description,
@@ -151,13 +217,22 @@ class AppViewModel : ViewModel() {
                 "imageUrls" to imageUrls,
                 "authorId" to userId,
                 "authorName" to userName,
-                "type" to type, // "LOST" or "FOUND"
+                "type" to type, // Must be present to distinguish LOST vs FOUND
                 "createdAt" to System.currentTimeMillis(),
                 "status" to "active"
             )
+
+            // Step 2: Save to Firestore and await success
             firestore.collection("posts").add(postData).await()
-            createPostState.value = SinglePostState.Updated // Use Updated to signal success
-        } catch (e: Exception) { createPostState.value = SinglePostState.Error(e.message ?: "") }
+
+            // Step 3: Immediately refresh the feed using one-shot fetching
+            loadAllPosts()
+
+            // Step 4: After reload, update state to close the screen
+            createPostState.value = SinglePostState.Updated
+        } catch (e: Exception) {
+            createPostState.value = SinglePostState.Error(e.message ?: "")
+        }
     }
 
     fun updatePost(postId: String, newTitle: String, newDescription: String, newCategory: String, newLocation: String) = viewModelScope.launch {
@@ -188,49 +263,54 @@ class AppViewModel : ViewModel() {
 
     fun loadMyClaims() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: run { myClaimsState.value = MyClaimsState.Error("Not logged in"); return@launch }
-        firestore.collection("claims").whereEqualTo("claimerId", userId).orderBy("claimedAt", Query.Direction.DESCENDING).addSnapshotListener { snapshot, error ->
-            if (error != null) { myClaimsState.value = MyClaimsState.Error(error.message ?: ""); return@addSnapshotListener }
-            if (snapshot != null) { myClaimsState.value = MyClaimsState.Success(snapshot.toObjects(Claim::class.java).mapIndexed { i, c -> c.copy(id = snapshot.documents[i].id) }) }
+        try {
+            val snapshot = firestore.collection("claims")
+                .whereEqualTo("claimerId", userId)
+                .orderBy("claimedAt", Query.Direction.DESCENDING)
+                .get()
+                .await()
+
+            val claims = snapshot.toObjects(Claim::class.java).mapIndexed { i, c -> c.copy(id = snapshot.documents[i].id) }
+            myClaimsState.value = MyClaimsState.Success(claims)
+        } catch (e: Exception) {
+            myClaimsState.value = MyClaimsState.Error(e.message ?: "Failed to load claims")
         }
     }
 
-    // --- CLAIMS FOR POST OWNERS ---
     val claimsForMyPostsState = MutableStateFlow<MyClaimsState>(MyClaimsState.Loading)
 
     fun loadClaimsForMyPosts() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: run { claimsForMyPostsState.value = MyClaimsState.Error("Not logged in"); return@launch }
-        firestore.collection("claims").whereEqualTo("postOwnerId", userId).orderBy("claimedAt", Query.Direction.DESCENDING).addSnapshotListener { snapshot, error ->
-            if (error != null) { claimsForMyPostsState.value = MyClaimsState.Error(error.message ?: ""); return@addSnapshotListener }
-            if (snapshot != null) { claimsForMyPostsState.value = MyClaimsState.Success(snapshot.toObjects(Claim::class.java).mapIndexed { i, c -> c.copy(id = snapshot.documents[i].id) }) }
+        try {
+            val snapshot = firestore.collection("claims")
+                .whereEqualTo("postOwnerId", userId)
+                .orderBy("claimedAt", Query.Direction.DESCENDING)
+                .get()
+                .await()
+
+            val claims = snapshot.toObjects(Claim::class.java).mapIndexed { i, c -> c.copy(id = snapshot.documents[i].id) }
+            claimsForMyPostsState.value = MyClaimsState.Success(claims)
+        } catch (e: Exception) {
+            claimsForMyPostsState.value = MyClaimsState.Error(e.message ?: "Failed to load claims for my posts")
         }
     }
 
     fun approveClaim(claimId: String) = viewModelScope.launch {
         try {
             firestore.collection("claims").document(claimId).update("status", "approved").await()
-            // Deny all other pending claims for the same post
             val claimDoc = firestore.collection("claims").document(claimId).get().await()
             val postId = claimDoc.getString("postId") ?: return@launch
-            val otherClaims = firestore.collection("claims")
-                .whereEqualTo("postId", postId)
-                .whereEqualTo("status", "pending")
-                .get().await()
+            val otherClaims = firestore.collection("claims").whereEqualTo("postId", postId).whereEqualTo("status", "pending").get().await()
             otherClaims.documents.forEach { doc ->
-                if (doc.id != claimId) {
-                    firestore.collection("claims").document(doc.id).update("status", "denied").await()
-                }
+                if (doc.id != claimId) { firestore.collection("claims").document(doc.id).update("status", "denied").await() }
             }
-            // Update post status to "claimed" so it doesn't appear in feed
             firestore.collection("posts").document(postId).update("status", "claimed").await()
-            // Refresh the feed
             loadAllPosts()
         } catch (e: Exception) { /* Handle error */ }
     }
 
     fun rejectClaim(claimId: String) = viewModelScope.launch {
-        try {
-            firestore.collection("claims").document(claimId).update("status", "denied").await()
-        } catch (e: Exception) { /* Handle error */ }
+        try { firestore.collection("claims").document(claimId).update("status", "denied").await() } catch (e: Exception) { /* Handle error */ }
     }
 
     // --- MESSAGING ---
@@ -238,59 +318,59 @@ class AppViewModel : ViewModel() {
     val messagesState = MutableStateFlow<MessagesState>(MessagesState.Loading)
     val currentConversationId = MutableStateFlow<String?>(null)
 
+    // REWRITTEN: Loads chats using 'whereArrayContains' to match index
     fun loadConversations() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: run { conversationsState.value = ConversationsState.Error("Not logged in"); return@launch }
-        firestore.collection("conversations")
-            .whereIn("participants", listOf(listOf(userId), listOf(userId, userId)))
-            .orderBy("lastMessageTime", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    conversationsState.value = ConversationsState.Error(error.message ?: "")
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    val conversations = snapshot.documents.mapNotNull { doc ->
-                        val participants = doc.get("participants") as? List<String> ?: return@mapNotNull null
-                        if (userId !in participants) return@mapNotNull null
-                        Conversation(
-                            id = doc.id,
-                            postId = doc.getString("postId") ?: "",
-                            postTitle = doc.getString("postTitle") ?: "",
-                            postImageUrl = doc.getString("postImageUrl") ?: "",
-                            participant1Id = doc.getString("participant1Id") ?: "",
-                            participant1Name = doc.getString("participant1Name") ?: "",
-                            participant2Id = doc.getString("participant2Id") ?: "",
-                            participant2Name = doc.getString("participant2Name") ?: "",
-                            lastMessage = doc.getString("lastMessage") ?: "",
-                            lastMessageTime = doc.getLong("lastMessageTime") ?: 0L,
-                            unreadCount = 0
-                        )
-                    }
-                    conversationsState.value = ConversationsState.Success(conversations)
-                }
+
+        try {
+            val snapshot = firestore.collection("conversations")
+                .whereArrayContains("participants", userId)
+                .orderBy("lastMessageTime", Query.Direction.DESCENDING)
+                .get()
+                .await()
+
+            val conversations = snapshot.documents.mapNotNull { doc ->
+                Conversation(
+                    id = doc.id,
+                    postId = doc.getString("postId") ?: "",
+                    postTitle = doc.getString("postTitle") ?: "",
+                    postImageUrl = doc.getString("postImageUrl") ?: "",
+                    participant1Id = doc.getString("participant1Id") ?: "",
+                    participant1Name = doc.getString("participant1Name") ?: "",
+                    participant2Id = doc.getString("participant2Id") ?: "",
+                    participant2Name = doc.getString("participant2Name") ?: "",
+                    lastMessage = doc.getString("lastMessage") ?: "",
+                    lastMessageTime = doc.getLong("lastMessageTime") ?: 0L,
+                    unreadCount = doc.getLong("unreadCount")?.toInt() ?: 0
+                )
             }
+
+            conversationsState.value = ConversationsState.Success(conversations)
+        } catch (e: Exception) {
+            conversationsState.value = ConversationsState.Error(e.message ?: "Failed to load chats")
+        }
     }
 
-    fun getOrCreateConversation(postId: String, postTitle: String, postImageUrl: String, postOwnerId: String, postOwnerName: String, callback: (String) -> Unit) = viewModelScope.launch {
-        val userId = auth.currentUser?.uid ?: return@launch
+    fun getOrCreateConversation(postId: String, postTitle: String, postImageUrl: String, postOwnerId: String, postOwnerName: String, callback: (Result<String>) -> Unit) = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: run { callback(Result.failure(Exception("Not logged in"))); return@launch }
         val userDisplayName = userProfile.value.displayName
 
-        // Check if conversation already exists
-        val existingConversation = firestore.collection("conversations")
-            .whereEqualTo("postId", postId)
-            .whereArrayContains("participants", userId)
-            .get()
-            .await()
-            .documents
-            .firstOrNull { doc ->
-                val participants = doc.get("participants") as? List<String> ?: emptyList()
-                postOwnerId in participants
+        try {
+            val existingConversation = firestore.collection("conversations")
+                .whereEqualTo("postId", postId)
+                .whereArrayContains("participants", userId)
+                .get().await()
+                .documents
+                .firstOrNull { doc ->
+                    val participants = doc.get("participants") as? List<String> ?: emptyList()
+                    postOwnerId in participants
+                }
+
+            if (existingConversation != null) {
+                callback(Result.success(existingConversation.id))
+                return@launch
             }
 
-        if (existingConversation != null) {
-            callback(existingConversation.id)
-        } else {
-            // Create new conversation
             val conversationData = hashMapOf(
                 "postId" to postId,
                 "postTitle" to postTitle,
@@ -301,17 +381,22 @@ class AppViewModel : ViewModel() {
                 "participant2Name" to postOwnerName,
                 "participants" to listOf(userId, postOwnerId),
                 "lastMessage" to "",
-                "lastMessageTime" to System.currentTimeMillis()
+                "lastMessageTime" to System.currentTimeMillis(),
+                "unreadCount" to 0
             )
             val newConversation = firestore.collection("conversations").add(conversationData).await()
-            callback(newConversation.id)
+            callback(Result.success(newConversation.id))
+        } catch (e: Exception) {
+            callback(Result.failure(e))
         }
     }
 
+    // REWRITTEN: Loads messages from the MAIN collection
     fun loadMessages(conversationId: String) = viewModelScope.launch {
         currentConversationId.value = conversationId
-        firestore.collection("conversations").document(conversationId)
-            .collection("messages")
+
+        firestore.collection("messages") // Using main collection
+            .whereEqualTo("conversationId", conversationId)
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -320,11 +405,30 @@ class AppViewModel : ViewModel() {
                 }
                 if (snapshot != null) {
                     val messages = snapshot.toObjects(Message::class.java).mapIndexed { i, m ->
-                        m.copy(id = snapshot.documents[i].id, conversationId = conversationId)
+                        m.copy(id = snapshot.documents[i].id)
                     }
                     messagesState.value = MessagesState.Success(messages)
                 }
             }
+    }
+
+    // One-shot fetch for messages (for pull-to-refresh or initial load without realtime listeners)
+    fun loadMessagesOnce(conversationId: String) = viewModelScope.launch {
+        currentConversationId.value = conversationId
+        messagesState.value = MessagesState.Loading
+        try {
+            val snapshot = firestore.collection("messages")
+                .whereEqualTo("conversationId", conversationId)
+                .orderBy("timestamp", Query.Direction.ASCENDING)
+                .get()
+                .await()
+            val messages = snapshot.toObjects(Message::class.java).mapIndexed { i, m ->
+                m.copy(id = snapshot.documents[i].id)
+            }
+            messagesState.value = MessagesState.Success(messages)
+        } catch (e: Exception) {
+            messagesState.value = MessagesState.Error(e.message ?: "Failed to load messages")
+        }
     }
 
     fun sendMessage(conversationId: String, text: String) = viewModelScope.launch {
@@ -333,6 +437,7 @@ class AppViewModel : ViewModel() {
 
         try {
             val messageData = hashMapOf(
+                "conversationId" to conversationId,
                 "senderId" to userId,
                 "senderName" to userName,
                 "text" to text,
@@ -340,18 +445,16 @@ class AppViewModel : ViewModel() {
                 "read" to false
             )
 
-            // Add message to subcollection
-            firestore.collection("conversations").document(conversationId)
-                .collection("messages")
-                .add(messageData)
-                .await()
+            // 1. Add to main messages collection
+            firestore.collection("messages").add(messageData).await()
 
-            // Update conversation last message
+            // 2. Update the conversation preview
             firestore.collection("conversations").document(conversationId)
                 .update(
                     mapOf(
                         "lastMessage" to text,
                         "lastMessageTime" to System.currentTimeMillis()
+                        // Optional: Increment unreadCount logic here later
                     )
                 )
                 .await()
@@ -366,4 +469,48 @@ class AppViewModel : ViewModel() {
             callback("User")
         }
     }
+
+    // --- BOOKMARKS ---
+    fun toggleBookmark(post: Post) = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: return@launch
+        try {
+            val q = firestore.collection("bookmarks")
+                .whereEqualTo("userId", userId)
+                .whereEqualTo("postId", post.id)
+                .limit(1)
+                .get()
+                .await()
+            if (q.isEmpty) {
+                val bookmark = mapOf(
+                    "userId" to userId,
+                    "postId" to post.id,
+                    "createdAt" to System.currentTimeMillis()
+                )
+                firestore.collection("bookmarks").add(bookmark).await()
+            } else {
+                firestore.collection("bookmarks").document(q.documents.first().id).delete().await()
+            }
+            // Refresh bookmark cache
+            loadBookmarks()
+        } catch (e: Exception) {
+            // Optionally expose an error channel/snackbar
+        }
+    }
+
+    // --- BOOKMARK CACHE LOADER ---
+    private fun loadBookmarks() = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: run { bookmarks.value = emptySet(); return@launch }
+        try {
+            val snapshot = firestore.collection("bookmarks")
+                .whereEqualTo("userId", userId)
+                .get()
+                .await()
+            val ids = snapshot.documents.mapNotNull { it.getString("postId") }.toSet()
+            bookmarks.value = ids
+        } catch (e: Exception) {
+            bookmarks.value = emptySet()
+        }
+    }
+
+    fun isBookmarked(postId: String): Boolean = bookmarks.value.contains(postId)
 }
