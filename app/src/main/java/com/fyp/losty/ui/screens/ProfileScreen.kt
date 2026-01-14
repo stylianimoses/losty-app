@@ -27,17 +27,17 @@ import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.fyp.losty.AppViewModel
 import com.fyp.losty.R
-import com.fyp.losty.ui.components.BackToHomeButton
+import com.fyp.losty.ui.components.BackButton
 import com.google.firebase.auth.FirebaseAuth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     navController: NavController,
-    appViewModel: AppViewModel = viewModel(),
-    onSignOut: () -> Unit
+    appViewModel: AppViewModel = viewModel()
 ) {
     val userProfile by appViewModel.userProfile.collectAsState()
+    val isSignedOut by appViewModel.isSignedOut.collectAsState() // Observe sign-out state
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
@@ -45,12 +45,23 @@ fun ProfileScreen(
     LaunchedEffect(Unit) {
         appViewModel.loadUserProfile()
     }
+    
+    // FIX: State-driven navigation using LaunchedEffect
+    LaunchedEffect(isSignedOut) {
+        if (isSignedOut) {
+            navController.navigate("auth_graph") { // Navigate to the auth_graph
+                popUpTo("main_graph") { inclusive = true } // Clear main graph
+                launchSingleTop = true
+            }
+        }
+    }
+
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(text = "Profile", fontWeight = FontWeight.Bold) },
-                navigationIcon = { BackToHomeButton(navController = navController) },
+                navigationIcon = { BackButton(navController = navController) },
                 actions = {
                     IconButton(onClick = { showSignOutDialog = true }) {
                         Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign Out", tint = Color(0xFFE91E63))
@@ -135,9 +146,8 @@ fun ProfileScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        FirebaseAuth.getInstance().signOut()
+                        appViewModel.signOut() // Use the ViewModel's state-updating sign-out function
                         showSignOutDialog = false
-                        onSignOut()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
                 ) { Text("Sign Out") }

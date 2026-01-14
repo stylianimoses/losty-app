@@ -71,7 +71,6 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
 
     val context = LocalContext.current
     val authState by appViewModel.authState.collectAsState()
-    var submitted by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     // Initialize Credential Manager
@@ -86,7 +85,7 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
     val isPasswordValid = password.length >= 8
     val isFormComplete = isEmailValid && fullName.isNotBlank() && username.isNotBlank() && isPasswordValid
 
-    LaunchedEffect(authState) {
+    LaunchedEffect(key1 = authState) {
         when (authState) {
             is AuthState.Success -> {
                 Log.i("RegisterScreen", "AuthState.Success detected, navigating to main")
@@ -95,13 +94,11 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                     popUpTo("auth_graph") { inclusive = true }
                     launchSingleTop = true
                 }
-                submitted = false
             }
             is AuthState.Error -> {
                 val msg = (authState as AuthState.Error).message
                 Log.w("RegisterScreen", "AuthState.Error: $msg")
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                submitted = false
             }
             else -> Unit
         }
@@ -316,7 +313,6 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                     Button(
                         onClick = {
                             Log.i("RegisterScreen", "Sign up clicked: fullName=$fullName, email=$email")
-                            submitted = true
                             appViewModel.registerUser(
                                 email = email,
                                 fullName = fullName,
@@ -325,7 +321,7 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                                 imageUri = selectedImageUri
                             )
                         },
-                        enabled = isFormComplete && authState !is AuthState.Loading && !submitted,
+                        enabled = isFormComplete && authState !is AuthState.Loading,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = if (isFormComplete) PrimaryBlue else DisabledGray)

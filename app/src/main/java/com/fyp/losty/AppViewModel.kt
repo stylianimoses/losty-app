@@ -6,23 +6,40 @@ import android.util.Patterns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 // --- DATA CLASSES ---
-data class Post(val id: String = "", val title: String = "", val description: String = "", val category: String = "", val location: String = "", val imageUrls: List<String> = emptyList(), val authorId: String = "", val authorName: String = "", val authorImageUrl: String = "", val createdAt: Long = 0L, val status: String = "", val type: String = "")
+data class Post(
+    val id: String = "",
+    val title: String = "",
+    val description: String = "",
+    val category: String = "",
+    val location: String = "",
+    val imageUrls: List<String> = emptyList(),
+    val authorId: String = "",
+    val authorName: String = "",
+    val authorImageUrl: String = "",
+    val createdAt: Long = 0L,
+    val status: String = "",
+    val type: String = "",
+    // --- NEW SECURITY FIELDS ---
+    val requiresSecurityCheck: Boolean = false,
+    val securityQuestion: String = "",
+    val securityAnswer: String = ""
+)
+
 data class UserProfile(val uid: String = "", val displayName: String = "", val email: String = "", val photoUrl: String = "")
 data class Claim(val id: String = "", val postId: String = "", val postTitle: String = "", val postOwnerId: String = "", val claimerId: String = "", val status: String = "", val claimedAt: Long = 0L)
 data class Notification(
@@ -41,7 +58,14 @@ data class Message(val id: String = "", val conversationId: String = "", val sen
 data class Conversation(val id: String = "", val postId: String = "", val postTitle: String = "", val postImageUrl: String = "", val participant1Id: String = "", val participant1Name: String = "", val participant2Id: String = "", val participant2Name: String = "", val lastMessage: String = "", val lastMessageTime: Long = 0L, val unreadCount: Int = 0)
 
 // --- STATE HOLDERS ---
-sealed class AuthState { object Idle : AuthState(); object Loading : AuthState(); object Success : AuthState(); data class Error(val message: String) : AuthState() }
+sealed class AuthState {
+    object Idle : AuthState()
+    object Loading : AuthState()
+    data class Success(val user: FirebaseUser?) : AuthState()
+    data class Error(val message: String) : AuthState()
+}
+
+sealed class AuthResult { object Success : AuthResult(); data class Error(val message: String) : AuthResult(); object Idle : AuthResult() }
 sealed class PostFeedState { object Loading : PostFeedState(); data class Success(val posts: List<Post>) : PostFeedState(); data class Error(val message: String) : PostFeedState() }
 sealed class SinglePostState { object Idle : SinglePostState(); object Loading : SinglePostState(); data class Success(val post: Post) : SinglePostState(); object Updated : SinglePostState(); data class Error(val message: String) : SinglePostState() }
 sealed class MyClaimsState { object Loading : MyClaimsState(); data class Success(val claims: List<Claim>) : MyClaimsState(); data class Error(val message: String) : MyClaimsState() }
@@ -60,6 +84,9 @@ class AppViewModel : ViewModel() {
 
     // --- STATES & EVENTS ---
     val authState = MutableStateFlow<AuthState>(AuthState.Idle)
+    private val _authEvent = MutableSharedFlow<AuthResult>()
+    val authEvent = _authEvent.asSharedFlow()
+    
     val userProfile = MutableStateFlow(UserProfile())
     val postFeedState = MutableStateFlow<PostFeedState>(PostFeedState.Loading)
     val myPostsState = MutableStateFlow<PostFeedState>(PostFeedState.Loading)
@@ -77,14 +104,26 @@ class AppViewModel : ViewModel() {
     val unreadNotificationCount: StateFlow<Int> = _unreadNotificationCount
     private var notificationListener: ListenerRegistration? = null
 
+    // New state to signal sign-out completion for LaunchedEffect
+    private val _isSignedOut = MutableStateFlow(false)
+    val isSignedOut: StateFlow<Boolean> = _isSignedOut.asStateFlow()
+
     // --- BOOKMARK CACHE ---
     // Holds the set of postIds the current user has bookmarked
     val bookmarks = MutableStateFlow<Set<String>>(emptySet())
 
     init {
-        loadAllPosts()
-        loadBookmarks()
-        listenForNotifications()
+        auth.addAuthStateListener { firebaseAuth ->
+            if (firebaseAuth.currentUser != null) {
+                loadUserProfile()
+                loadAllPosts()
+                loadMyPosts()
+                loadBookmarks()
+                listenForNotifications()
+                // Reset sign out flag if the user logs back in
+                _isSignedOut.value = false 
+            }
+        }
     }
 
     // --- AUTH ---
@@ -98,19 +137,23 @@ class AppViewModel : ViewModel() {
         authState.value = AuthState.Loading
 
         if (imageUri == null) {
-            authState.value = AuthState.Error("Please select a profile image.")
+            _authEvent.emit(AuthResult.Error("Please select a profile image."))
+            authState.value = AuthState.Idle
             return@launch
         }
         if (email.isBlank() || fullName.isBlank() || username.isBlank() || password.isBlank()) {
-            authState.value = AuthState.Error("Please fill in all fields.")
+            _authEvent.emit(AuthResult.Error("Please fill in all fields."))
+            authState.value = AuthState.Idle
             return@launch
         }
         if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-            authState.value = AuthState.Error("Please enter a valid email address.")
+            _authEvent.emit(AuthResult.Error("Please enter a valid email address."))
+            authState.value = AuthState.Idle
             return@launch
         }
         if (password.length < 8) {
-            authState.value = AuthState.Error("Password must be at least 8 characters.")
+            _authEvent.emit(AuthResult.Error("Password must be at least 8 characters."))
+            authState.value = AuthState.Idle
             return@launch
         }
 
@@ -139,14 +182,17 @@ class AppViewModel : ViewModel() {
             )
             firestore.collection("users").document(firebaseUser.uid).set(userMap).await()
 
-            authState.value = AuthState.Success
+            authState.value = AuthState.Success(firebaseUser)
         } catch (e: Exception) {
             val errorMessage = e.message ?: "An unknown error occurred"
-            authState.value = if (errorMessage.contains("already in use", ignoreCase = true)) {
-                AuthState.Error("This email is already registered. Please try to sign in.")
+            val error = if (errorMessage.contains("already in use", ignoreCase = true)) {
+                AuthResult.Error("This email is already registered. Please try to sign in.")
             } else {
-                AuthState.Error(errorMessage)
+                AuthResult.Error(errorMessage)
             }
+            _authEvent.emit(error)
+        } finally {
+            authState.value = AuthState.Idle
         }
     }
 
@@ -154,18 +200,22 @@ class AppViewModel : ViewModel() {
         authState.value = AuthState.Loading
         try {
             if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-                authState.value = AuthState.Error("Please enter a valid email address.")
+                _authEvent.emit(AuthResult.Error("Please enter a valid email address."))
+                authState.value = AuthState.Idle
                 return@launch
             }
-            auth.signInWithEmailAndPassword(email, password).await()
-            val user = auth.currentUser
+            val authResult = auth.signInWithEmailAndPassword(email, password).await()
+            val user = authResult.user
             if (user != null && !user.isEmailVerified) {
-                authState.value = AuthState.Error("Please verify your email before logging in.")
+                _authEvent.emit(AuthResult.Error("Please verify your email before logging in."))
+                authState.value = AuthState.Idle
                 return@launch
             }
-            authState.value = AuthState.Success
+            authState.value = AuthState.Success(user)
         } catch (e: Exception) {
-            authState.value = AuthState.Error(e.message ?: "An unknown error occurred")
+            _authEvent.emit(AuthResult.Error(e.message ?: "An unknown error occurred"))
+        } finally {
+             authState.value = AuthState.Idle
         }
     }
 
@@ -173,10 +223,12 @@ class AppViewModel : ViewModel() {
         authState.value = AuthState.Loading
         try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
-            auth.signInWithCredential(credential).await()
-            authState.value = AuthState.Success
+            val authResult = auth.signInWithCredential(credential).await()
+            authState.value = AuthState.Success(authResult.user)
         } catch (e: Exception) {
-            authState.value = AuthState.Error(e.message ?: "Google Sign-In failed")
+            _authEvent.emit(AuthResult.Error(e.message ?: "Google Sign-In failed"))
+        } finally {
+            authState.value = AuthState.Idle
         }
     }
 
@@ -184,9 +236,27 @@ class AppViewModel : ViewModel() {
         authState.value = AuthState.Loading
         try {
             auth.sendPasswordResetEmail(email).await()
-            authState.value = AuthState.Success
+            _authEvent.emit(AuthResult.Success)
         } catch (e: Exception) {
-            authState.value = AuthState.Error(e.message ?: "Failed to send reset email")
+            _authEvent.emit(AuthResult.Error(e.message ?: "Failed to send reset email"))
+        } finally {
+            authState.value = AuthState.Idle
+        }
+    }
+    
+    fun signOut() = viewModelScope.launch {
+        try {
+            auth.signOut()
+            _isSignedOut.value = true // Signal successful sign-out
+            // Reset local states to prepare for the next user or state
+            authState.value = AuthState.Idle
+            userProfile.value = UserProfile()
+            bookmarks.value = emptySet()
+            // Important: Clear listeners if they were attached
+            notificationListener?.remove()
+        } catch (e: Exception) {
+            // Handle error, though signOut rarely fails in this way
+            Log.e("AppViewModel", "Sign out failed: ${e.message}")
         }
     }
 
@@ -227,15 +297,36 @@ class AppViewModel : ViewModel() {
     fun loadAllPosts(isRefresh: Boolean = false) = viewModelScope.launch {
         if (isRefresh) _isRefreshing.value = true
         else postFeedState.value = PostFeedState.Loading
-        
+
         try {
             val snapshot = firestore.collection("posts")
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .get()
                 .await()
 
-            val allPosts = snapshot.toObjects(Post::class.java).mapIndexed { i, p ->
-                p.copy(id = snapshot.documents[i].id)
+            val allPosts = snapshot.documents.mapNotNull { doc ->
+                try {
+                    Post(
+                        id = doc.id,
+                        title = doc.getString("title") ?: "",
+                        description = doc.getString("description") ?: "",
+                        category = doc.getString("category") ?: "",
+                        location = doc.getString("location") ?: "",
+                        imageUrls = (doc.get("imageUrls") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        authorId = doc.getString("authorId") ?: "",
+                        authorName = doc.getString("authorName") ?: "",
+                        authorImageUrl = doc.getString("authorImageUrl") ?: "",
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        status = doc.getString("status") ?: "",
+                        type = doc.getString("type") ?: "LOST",
+                        requiresSecurityCheck = doc.getBoolean("requiresSecurityCheck") ?: false,
+                        securityQuestion = doc.getString("securityQuestion") ?: "",
+                        securityAnswer = doc.getString("securityAnswer") ?: ""
+                    )
+                } catch (e: Exception) {
+                    Log.e("AppViewModel", "Failed to parse post ${doc.id}", e)
+                    null
+                }
             }
             val activePosts = allPosts.filter { it.status == "active" }
             postFeedState.value = PostFeedState.Success(activePosts)
@@ -255,7 +346,32 @@ class AppViewModel : ViewModel() {
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .get()
                 .await()
-            myPostsState.value = PostFeedState.Success(snapshot.toObjects(Post::class.java).mapIndexed { i, p -> p.copy(id = snapshot.documents[i].id) })
+
+            val myPosts = snapshot.documents.mapNotNull { doc ->
+                 try {
+                    Post(
+                        id = doc.id,
+                        title = doc.getString("title") ?: "",
+                        description = doc.getString("description") ?: "",
+                        category = doc.getString("category") ?: "",
+                        location = doc.getString("location") ?: "",
+                        imageUrls = (doc.get("imageUrls") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        authorId = doc.getString("authorId") ?: "",
+                        authorName = doc.getString("authorName") ?: "",
+                        authorImageUrl = doc.getString("authorImageUrl") ?: "",
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        status = doc.getString("status") ?: "",
+                        type = doc.getString("type") ?: "LOST",
+                        requiresSecurityCheck = doc.getBoolean("requiresSecurityCheck") ?: false,
+                        securityQuestion = doc.getString("securityQuestion") ?: "",
+                        securityAnswer = doc.getString("securityAnswer") ?: ""
+                    )
+                } catch (e: Exception) {
+                    Log.e("AppViewModel", "Failed to parse post ${doc.id}", e)
+                    null
+                }
+            }
+            myPostsState.value = PostFeedState.Success(myPosts)
         } catch (e: Exception) {
             myPostsState.value = PostFeedState.Error(e.message ?: "Failed to load my posts")
         }
@@ -264,12 +380,54 @@ class AppViewModel : ViewModel() {
     fun getPost(postId: String) = viewModelScope.launch {
         postToEditState.value = SinglePostState.Loading
         try {
-            val post = firestore.collection("posts").document(postId).get().await().toObject(Post::class.java)?.copy(id = postId)
-            if (post != null) { postToEditState.value = SinglePostState.Success(post) } else { postToEditState.value = SinglePostState.Error("Post not found.") }
-        } catch (e: Exception) { postToEditState.value = SinglePostState.Error(e.message ?: "An unknown error occurred.") }
+            val doc = firestore.collection("posts").document(postId).get().await()
+            if (doc.exists()) {
+                val post = try {
+                    Post(
+                        id = doc.id,
+                        title = doc.getString("title") ?: "",
+                        description = doc.getString("description") ?: "",
+                        category = doc.getString("category") ?: "",
+                        location = doc.getString("location") ?: "",
+                        imageUrls = (doc.get("imageUrls") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        authorId = doc.getString("authorId") ?: "",
+                        authorName = doc.getString("authorName") ?: "",
+                        authorImageUrl = doc.getString("authorImageUrl") ?: "",
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        status = doc.getString("status") ?: "",
+                        type = doc.getString("type") ?: "LOST",
+                        requiresSecurityCheck = doc.getBoolean("requiresSecurityCheck") ?: false,
+                        securityQuestion = doc.getString("securityQuestion") ?: "",
+                        securityAnswer = doc.getString("securityAnswer") ?: ""
+                    )
+                } catch (e: Exception) {
+                    Log.e("AppViewModel", "Failed to parse post ${doc.id}", e)
+                    null
+                }
+                if (post != null) {
+                    postToEditState.value = SinglePostState.Success(post)
+                } else {
+                    postToEditState.value = SinglePostState.Error("Failed to parse post data.")
+                }
+            } else {
+                postToEditState.value = SinglePostState.Error("Post not found.")
+            }
+        } catch (e: Exception) {
+            postToEditState.value = SinglePostState.Error(e.message ?: "An unknown error occurred.")
+        }
     }
 
-    fun createPost(title: String, description: String, category: String, location: String, imageUris: List<Uri>, type: String = "LOST") = viewModelScope.launch {
+    fun createPost(
+        title: String,
+        description: String,
+        category: String,
+        location: String,
+        imageUris: List<Uri>,
+        type: String = "LOST",
+        requiresSecurityCheck: Boolean = false,
+        securityQuestion: String = "",
+        securityAnswer: String = ""
+    ) = viewModelScope.launch {
         createPostState.value = SinglePostState.Loading
         val userId = auth.currentUser?.uid ?: run { createPostState.value = SinglePostState.Error("Not logged in"); return@launch }
         val userName = userProfile.value.displayName
@@ -306,7 +464,10 @@ class AppViewModel : ViewModel() {
                 "authorImageUrl" to userImageUrl,
                 "type" to type, // Must be present to distinguish LOST vs FOUND
                 "createdAt" to System.currentTimeMillis(),
-                "status" to "active"
+                "status" to "active",
+                "requiresSecurityCheck" to requiresSecurityCheck,
+                "securityQuestion" to securityQuestion,
+                "securityAnswer" to securityAnswer
             )
 
             // Step 2: Save to Firestore and await success
@@ -343,6 +504,18 @@ class AppViewModel : ViewModel() {
         if (userId == post.authorId) { _claimEventChannel.send(ClaimEvent.Error("You cannot claim your own item.")); return@launch }
 
         try {
+            // Audit Log: Prevent a user from claiming the same item twice
+            val existingClaims = firestore.collection("claims")
+                .whereEqualTo("postId", post.id)
+                .whereEqualTo("claimerId", userId)
+                .get()
+                .await()
+
+            if (!existingClaims.isEmpty) {
+                _claimEventChannel.send(ClaimEvent.Error("You have already claimed this item."))
+                return@launch
+            }
+
             val claimData = hashMapOf(
                 "postId" to post.id,
                 "postTitle" to post.title,

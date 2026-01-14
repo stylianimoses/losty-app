@@ -46,7 +46,7 @@ import com.fyp.losty.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
-fun HomeScreen(navController: NavController, appNavController: NavController) {
+fun HomeScreen(appNavController: NavController) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val appViewModel: AppViewModel = viewModel()
     val postFeedState by appViewModel.postFeedState.collectAsState()
@@ -66,7 +66,7 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
     }
 
     // Observe internal nav backstack to decide which bottom item should appear selected
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val navBackStackEntry by appNavController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination?.route
     val selectedRoute = when {
         currentDestination == "home" -> "home"
@@ -91,7 +91,7 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
                 ),
                 actions = {
                     BadgedBox(badge = { if (unreadNotificationCount > 0) Badge { Text("$unreadNotificationCount") } }) {
-                        IconButton(onClick = { navController.navigate("my_activity") }) {
+                        IconButton(onClick = { appNavController.navigate("my_activity") }) {
                             Icon(imageVector = Icons.Filled.Notifications, contentDescription = "Notifications", tint = ElectricPink)
                         }
                     }
@@ -101,11 +101,11 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
         bottomBar = {
             BottomNavigationBar(selectedRoute = selectedRoute, onItemSelected = { route ->
                 when (route) {
-                    "home" -> navController.navigate("home")
-                    "chat" -> navController.navigate("conversations")
+                    "home" -> appNavController.navigate("home")
+                    "chat" -> appNavController.navigate("conversations")
                     "add" -> appNavController.navigate("create_post")
-                    "my_activity" -> navController.navigate("my_activity")
-                    "profile" -> navController.navigate("profile")
+                    "my_activity" -> appNavController.navigate("my_activity")
+                    "profile" -> appNavController.navigate("profile")
                 }
             })
         }
@@ -133,7 +133,7 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
                     if (postFeedState is PostFeedState.Success) {
                         val filtered = (postFeedState as PostFeedState.Success).posts.filter { it.type.equals(selectedType, ignoreCase = false) }
                         items(filtered) { post ->
-                            PostCard(post = post, navController = navController, appViewModel = appViewModel)
+                            PostCard(post = post, navController = appNavController, appViewModel = appViewModel)
                         }
                     }
                 }
@@ -213,6 +213,10 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
     var creatingConversation by remember { mutableStateOf(false) }
     val userProfile by appViewModel.userProfile.collectAsState()
     val bookmarks by appViewModel.bookmarks.collectAsState()
+    
+    // --- GATEKEEPER STATE ---
+    var showSecurityDialog by remember { mutableStateOf(false) }
+    var userAnswer by remember { mutableStateOf("") }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -305,9 +309,15 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
                 }
                 Spacer(modifier = Modifier.weight(1f))
 
-                if (post.type == "LOST" && post.authorId != userProfile.uid) {
+                if (post.authorId != userProfile.uid) {
                     Button(
-                        onClick = { appViewModel.createClaim(post) },
+                        onClick = {
+                            if (post.type == "FOUND" && post.requiresSecurityCheck) {
+                                showSecurityDialog = true // INTERCEPT: Show the Quiz
+                            } else {
+                                appViewModel.createClaim(post)
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = SafetyTeal)
                     ) {
                         Text("Claim", color = Color.White)
@@ -326,6 +336,44 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
             BuildCaption(post.authorName, post.description)
             Text(text = "", color = TextGrey, style = MaterialTheme.typography.bodySmall) // Timestamp removed for now
         }
+    }
+    
+    // --- THE SECURITY DIALOG ---
+    if (showSecurityDialog) {
+        AlertDialog(
+            onDismissRequest = { showSecurityDialog = false },
+            title = { Text("Prove Ownership") },
+            text = {
+                Column {
+                    Text("The finder asks: ", fontWeight = FontWeight.Bold)
+                    Text(post.securityQuestion)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = userAnswer,
+                        onValueChange = { userAnswer = it },
+                        placeholder = { Text("Your answer...") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        // Check logic (case-insensitive and trimmed)
+                        if (userAnswer.trim().equals(post.securityAnswer.trim(), ignoreCase = true)) {
+                            showSecurityDialog = false
+                            appViewModel.createClaim(post)
+                            Toast.makeText(context, "Verification Success!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Incorrect answer. Try again.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) { Text("Verify") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSecurityDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 

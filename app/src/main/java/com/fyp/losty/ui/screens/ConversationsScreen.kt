@@ -29,7 +29,7 @@ import coil.compose.AsyncImage
 import com.fyp.losty.AppViewModel
 import com.fyp.losty.Conversation
 import com.fyp.losty.ConversationsState
-import com.fyp.losty.ui.components.BackToHomeButton
+import com.fyp.losty.ui.components.BackButton
 import com.fyp.losty.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -52,7 +52,7 @@ fun ConversationsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(text = "Messages", fontWeight = FontWeight.Bold, color = TextBlack) },
-                navigationIcon = { BackToHomeButton(navController = navController) },
+                navigationIcon = { BackButton(navController = navController) },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = OffWhite)
             )
         },

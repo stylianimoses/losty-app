@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -53,6 +54,11 @@ fun CreatePostScreen(navController: NavController, appViewModel: AppViewModel = 
     var location by remember { mutableStateOf("") }
     var caption by remember { mutableStateOf("") }
     var selectedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    
+    // --- NEW SECURITY FIELDS ---
+    var securityQuestion by remember { mutableStateOf("") }
+    var securityAnswer by remember { mutableStateOf("") }
+
     // Validation / UI state
     var titleError by remember { mutableStateOf("") }
     var imageError by remember { mutableStateOf("") }
@@ -117,6 +123,11 @@ fun CreatePostScreen(navController: NavController, appViewModel: AppViewModel = 
                             if (selectedImageUris.isEmpty()) { imageError = "Upload at least one photo"; valid = false }
                             if (selectedCategory.isNullOrBlank()) { categoryError = "Please select a category"; /*not mandatory, but helpful*/ }
 
+                            if (postType == "FOUND" && (securityQuestion.isBlank() || securityAnswer.isBlank())) {
+                                Toast.makeText(context, "Please provide security question and answer", Toast.LENGTH_SHORT).show()
+                                valid = false
+                            }
+
                             if (!valid) {
                                 Toast.makeText(context, "Please fix errors before sharing", Toast.LENGTH_SHORT).show()
                                 return@TextButton
@@ -129,7 +140,10 @@ fun CreatePostScreen(navController: NavController, appViewModel: AppViewModel = 
                                 category = selectedCategory ?: "",
                                 location = location,
                                 imageUris = selectedImageUris,
-                                type = postType
+                                type = postType,
+                                requiresSecurityCheck = (postType == "FOUND"),
+                                securityQuestion = securityQuestion,
+                                securityAnswer = securityAnswer
                             )
                         },
                         enabled = createPostState !is SinglePostState.Loading
@@ -190,6 +204,32 @@ fun CreatePostScreen(navController: NavController, appViewModel: AppViewModel = 
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+            
+            // --- SECURITY SECTION FOR FOUND ITEMS ---
+            if (postType == "FOUND") {
+                Text("Verification Gatekeeper", fontWeight = FontWeight.Bold, color = SafetyTeal)
+                Text("Add a question only the true owner can answer.", fontSize = 12.sp, color = Color.Gray)
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                OutlinedTextField(
+                    value = securityQuestion,
+                    onValueChange = { securityQuestion = it },
+                    label = { Text("Security Question (e.g. What color is the keychain?)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                OutlinedTextField(
+                    value = securityAnswer,
+                    onValueChange = { securityAnswer = it },
+                    label = { Text("Correct Answer") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // Photo Upload Section
             Text(text = "Photo", style = MaterialTheme.typography.labelSmall, color = TextGrey)

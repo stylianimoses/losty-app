@@ -28,7 +28,7 @@ import com.fyp.losty.Claim
 import com.fyp.losty.MyClaimsState
 import com.fyp.losty.Post
 import com.fyp.losty.PostFeedState
-import com.fyp.losty.ui.components.BackToHomeButton
+import com.fyp.losty.ui.components.BackButton
 import com.fyp.losty.ui.theme.ElectricPink
 import com.fyp.losty.ui.theme.TextBlack
 import com.fyp.losty.ui.theme.TextGrey
@@ -39,7 +39,6 @@ import kotlinx.coroutines.launch
 fun MyActivityScreen(
     navController: NavController,
     appViewModel: AppViewModel = viewModel(),
-    appNavController: NavController
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -47,7 +46,7 @@ fun MyActivityScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(text = "My Activity", color = TextBlack, fontWeight = FontWeight.Bold) },
-                navigationIcon = { BackToHomeButton(navController = navController) },
+                navigationIcon = { BackButton(navController = navController) },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.White)
             )
         },
@@ -85,7 +84,7 @@ fun MyActivityScreen(
             }
 
             when (selectedTab) {
-                0 -> MyPostsTab(appViewModel = appViewModel, appNavController = appNavController) { selectedTab = 1 }
+                0 -> MyPostsTab(appViewModel = appViewModel, navController = navController) { selectedTab = 1 }
                 1 -> ClaimsTab(appViewModel = appViewModel)
             }
         }
@@ -95,7 +94,7 @@ fun MyActivityScreen(
 @Composable
 private fun MyPostsTab(
     appViewModel: AppViewModel,
-    appNavController: NavController,
+    navController: NavController,
     onViewClaims: () -> Unit
 ) {
     val myPostsState by appViewModel.myPostsState.collectAsState()
@@ -119,7 +118,7 @@ private fun MyPostsTab(
                             MyPostItem(
                                 post = post,
                                 onDeleteClick = { showDeleteDialog = post },
-                                onEditClick = { appNavController.navigate("edit_post/${post.id}") },
+                                onEditClick = { navController.navigate("edit_post/${post.id}") },
                                 onViewClaimsClick = onViewClaims
                             )
                         }

@@ -38,11 +38,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.fyp.losty.AppViewModel
+import com.fyp.losty.AuthResult
 import com.fyp.losty.AuthState
 import com.fyp.losty.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 private val PrimaryBlue = Color(0xFF349BEB) // requested exact blue
@@ -62,24 +64,20 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
     var credential by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var showResetDialog by remember { mutableStateOf(false) }
-    var resetEmail by remember { mutableStateOf("") }
 
     val authState by appViewModel.authState.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
 
-    LaunchedEffect(authState) {
-        when (val state = authState) {
-            is AuthState.Success -> {
-                navController.navigate("main_graph") {
-                    popUpTo("auth_graph") { inclusive = true }
-                    launchSingleTop = true
-                }
+    LaunchedEffect(key1 = authState) {
+        if (authState is AuthState.Success) {
+            navController.navigate("main_graph") {
+                popUpTo("auth_graph") { inclusive = true }
+                launchSingleTop = true
             }
-            is AuthState.Error -> Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
-            else -> Unit
+        } else if (authState is AuthState.Error) {
+            Toast.makeText(context, (authState as AuthState.Error).message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -254,12 +252,14 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    TextButton(onClick = { showResetDialog = true }, modifier = Modifier.align(Alignment.End)) { Text("Forgot password?") }
+                    TextButton(onClick = { navController.navigate("reset_password") }, modifier = Modifier.align(Alignment.End)) { Text("Forgot password?") }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
                         onClick = {
+                            // This just tells the ViewModel to start the login process.
+                            // It does NOT navigate.
                             if (!isNetworkAvailable(context)) Toast.makeText(context, "No network connection", Toast.LENGTH_SHORT).show()
                             else appViewModel.loginUser(credential, password)
                         },
@@ -287,26 +287,6 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                     }
                 }
             }
-        }
-
-        if (showResetDialog) {
-            AlertDialog(
-                onDismissRequest = { showResetDialog = false },
-                title = { Text("Reset Password") },
-                text = {
-                    Column {
-                        Text("Enter the email associated with your account to receive reset instructions.")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(value = resetEmail, onValueChange = { resetEmail = it }, placeholder = { Text("Email") }, modifier = Modifier.fillMaxWidth())
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { appViewModel.sendPasswordReset(resetEmail); showResetDialog = false }) { Text("Send") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
-                }
-            )
         }
 
         if (authState is AuthState.Loading) {

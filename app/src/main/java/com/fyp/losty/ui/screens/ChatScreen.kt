@@ -34,7 +34,7 @@ import com.fyp.losty.ConversationsState
 import com.fyp.losty.Message
 import com.fyp.losty.MessagesState
 import com.fyp.losty.R
-import com.fyp.losty.ui.components.BackToHomeButton
+import com.fyp.losty.ui.components.BackButton
 import com.fyp.losty.ui.theme.ElectricPink
 import com.fyp.losty.ui.theme.OffWhite
 import com.fyp.losty.ui.theme.TextBlack
@@ -97,7 +97,7 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = { BackToHomeButton(navController = navController) },
+                navigationIcon = { BackButton(navController = navController) },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
