@@ -29,7 +29,7 @@ import coil.compose.AsyncImage
 import com.fyp.losty.AppViewModel
 import com.fyp.losty.Conversation
 import com.fyp.losty.ConversationsState
-import com.fyp.losty.ui.components.BackToHomeButton
+import com.fyp.losty.ui.components.BackButton
 import com.fyp.losty.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -51,12 +51,12 @@ fun ConversationsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(text = "Messages", fontWeight = FontWeight.Bold, color = TextBlack) },
-                navigationIcon = { BackToHomeButton(navController = navController) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = OffWhite)
+                title = { Text(text = "Messages", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
+                navigationIcon = { BackButton(navController = navController) },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         },
-        containerColor = OffWhite
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         val isRefreshing = conversationsState is ConversationsState.Loading
         val pullRefreshState = rememberPullRefreshState(isRefreshing, onRefresh = { appViewModel.loadConversations() })
@@ -69,33 +69,31 @@ fun ConversationsScreen(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // --- NEW FUNCTION: Search Bar (Integrated into Original Theme) ---
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
-                    color = Color.White, // White bar on OffWhite background
+                    color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 2.dp
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     ) {
-                        Icon(Icons.Default.Search, contentDescription = "Search", tint = TextGrey)
+                        Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Search chats...", color = TextGrey, fontSize = 15.sp)
+                        Text("Search chats...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
                     }
                 }
 
-                // Chat List
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     when (val state = conversationsState) {
                         is ConversationsState.Loading -> CircularProgressIndicator(color = ElectricPink)
                         is ConversationsState.Success -> {
                             if (state.conversations.isEmpty()) {
-                                Text("No messages yet", color = TextGrey)
+                                Text("No messages yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
                                 LazyColumn(
                                     modifier = Modifier.fillMaxSize(),
@@ -103,7 +101,6 @@ fun ConversationsScreen(
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     items(state.conversations) { conversation ->
-                                        // Maintained "Card" Design but updated content
                                         ConversationCard(
                                             conversation = conversation,
                                             currentUserId = currentUserId,
@@ -130,30 +127,27 @@ fun ConversationCard(
     onClick: () -> Unit
 ) {
     val otherUserName = if (currentUserId == conversation.participant1Id) conversation.participant2Name else conversation.participant1Name
-
-    // --- NEW FUNCTION: Unread Logic ---
     val isUnread = conversation.unreadCount > 0
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar / Post Context
             Surface(
                 modifier = Modifier.size(56.dp),
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFFF0F0F0)
+                color = MaterialTheme.colorScheme.surfaceVariant
             ) {
                 if (conversation.postImageUrl.isNotEmpty()) {
                     AsyncImage(model = conversation.postImageUrl, contentDescription = null, contentScale = ContentScale.Crop)
                 } else {
-                    Box(contentAlignment = Alignment.Center) { Text("Img", color = TextGrey, fontSize = 10.sp) }
+                    Box(contentAlignment = Alignment.Center) { Text("Img", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp) }
                 }
             }
 
@@ -164,14 +158,13 @@ fun ConversationCard(
                     Text(
                         text = otherUserName,
                         fontSize = 16.sp,
-                        color = TextBlack,
-                        // --- NEW FUNCTION: Bold if unread ---
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = if (isUnread) FontWeight.ExtraBold else FontWeight.Bold
                     )
                     Text(
                         text = formatTime(conversation.lastMessageTime),
                         fontSize = 12.sp,
-                        color = if (isUnread) ElectricPink else TextGrey,
+                        color = if (isUnread) ElectricPink else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Normal
                     )
                 }
@@ -182,21 +175,20 @@ fun ConversationCard(
                     Text(
                         text = conversation.lastMessage.ifEmpty { "Photo sent" },
                         fontSize = 14.sp,
-                        color = if (isUnread) TextBlack else TextGrey,
+                        color = if (isUnread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (isUnread) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
 
-                    // --- NEW FUNCTION: Unread Dot ---
                     if (isUnread) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
                                 .clip(CircleShape)
-                                .background(ElectricPink) // Brand Color for unread
+                                .background(ElectricPink)
                         )
                     }
                 }

@@ -43,11 +43,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
-import com.fyp.losty.AppViewModel
-import com.fyp.losty.R
 import com.fyp.losty.AuthState
-
-// Credential Manager Imports
+import com.fyp.losty.R
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -61,7 +58,7 @@ private val PrimaryBlue = Color(0xFF349BEB)
 private val DisabledGray = Color(0xFFDCE9F8)
 
 @Composable
-fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = viewModel()) {
+fun RegisterScreen(navController: NavController, viewModel: RegisterViewModel = viewModel()) {
     var email by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -70,11 +67,9 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
 
     val context = LocalContext.current
-    val authState by appViewModel.authState.collectAsState()
-    var submitted by remember { mutableStateOf(false) }
+    val authState by viewModel.authState.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Initialize Credential Manager
     val credentialManager = remember { CredentialManager.create(context) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -86,7 +81,7 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
     val isPasswordValid = password.length >= 8
     val isFormComplete = isEmailValid && fullName.isNotBlank() && username.isNotBlank() && isPasswordValid
 
-    LaunchedEffect(authState) {
+    LaunchedEffect(key1 = authState) {
         when (authState) {
             is AuthState.Success -> {
                 Log.i("RegisterScreen", "AuthState.Success detected, navigating to main")
@@ -95,13 +90,11 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                     popUpTo("auth_graph") { inclusive = true }
                     launchSingleTop = true
                 }
-                submitted = false
             }
             is AuthState.Error -> {
                 val msg = (authState as AuthState.Error).message
                 Log.w("RegisterScreen", "AuthState.Error: $msg")
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                submitted = false
             }
             else -> Unit
         }
@@ -117,8 +110,8 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                 .fillMaxSize()
                 .padding(16.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE6E9EE))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier
@@ -130,10 +123,9 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "LOSTY", fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "LOSTY", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    // --- GOOGLE SIGN-IN BUTTON ---
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -141,7 +133,6 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                             .testTag("social_button")
                             .clickable(enabled = authState !is AuthState.Loading) {
                                 coroutineScope.launch {
-                                    // Network Check using the imported classes
                                     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
                                     val isConnected = cm.activeNetwork?.let {
                                         cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -169,7 +160,7 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                                         if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                                             try {
                                                 val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data)
-                                                appViewModel.signInWithGoogle(googleIdToken.idToken)
+                                                viewModel.signInWithGoogle(googleIdToken.idToken)
                                             } catch (e: GoogleIdTokenParsingException) {
                                                 Toast.makeText(context, "Parsing error: ${e.message}", Toast.LENGTH_LONG).show()
                                             }
@@ -200,7 +191,7 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         HorizontalDivider(modifier = Modifier.weight(1f))
-                        Text("  OR  ", style = MaterialTheme.typography.bodyLarge, color = Color.Gray)
+                        Text("  OR  ", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
                         HorizontalDivider(modifier = Modifier.weight(1f))
                     }
                     Spacer(modifier = Modifier.height(16.dp))
@@ -315,9 +306,7 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
 
                     Button(
                         onClick = {
-                            Log.i("RegisterScreen", "Sign up clicked: fullName=$fullName, email=$email")
-                            submitted = true
-                            appViewModel.registerUser(
+                            viewModel.registerUser(
                                 email = email,
                                 fullName = fullName,
                                 username = username,
@@ -325,12 +314,16 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                                 imageUri = selectedImageUri
                             )
                         },
-                        enabled = isFormComplete && authState !is AuthState.Loading && !submitted,
+                        enabled = isFormComplete && authState !is AuthState.Loading,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = if (isFormComplete) PrimaryBlue else DisabledGray)
                     ) {
-                        Text(text = "Sign Up", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                        if (authState is AuthState.Loading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text(text = "Sign Up", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                        }
                     }
                 }
 
@@ -339,16 +332,12 @@ fun RegisterScreen(navController: NavController, appViewModel: AppViewModel = vi
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Have an account? ")
+                    Text("Have an account? ", color = MaterialTheme.colorScheme.onSurface)
                     TextButton(onClick = { navController.navigate("login") }) {
                         Text("Log In")
                     }
                 }
             }
-        }
-
-        if (authState is AuthState.Loading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
         }
     }
 }

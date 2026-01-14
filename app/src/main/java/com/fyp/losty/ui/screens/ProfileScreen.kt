@@ -1,16 +1,23 @@
 package com.fyp.losty.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,51 +29,77 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.fyp.losty.AppViewModel
+import com.fyp.losty.NotificationSettings
+import com.fyp.losty.Post
+import com.fyp.losty.PostFeedState
 import com.fyp.losty.R
-import com.fyp.losty.ui.components.BackToHomeButton
-import com.google.firebase.auth.FirebaseAuth
+import com.fyp.losty.ui.components.BackButton
+import com.fyp.losty.ui.components.TrustScoreCard
+import com.fyp.losty.ui.theme.UrgentRed
+import com.fyp.losty.ui.theme.SafetyTeal
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     navController: NavController,
-    appViewModel: AppViewModel = viewModel(),
-    onSignOut: () -> Unit
+    appViewModel: AppViewModel = viewModel()
 ) {
     val userProfile by appViewModel.userProfile.collectAsState()
+    val isSignedOut by appViewModel.isSignedOut.collectAsState()
+    
+    val myPostsState by appViewModel.myPostsState.collectAsState()
+    val bookmarkedPostsState by appViewModel.bookmarkedPostsState.collectAsState()
+
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         appViewModel.loadUserProfile()
+        appViewModel.loadMyPosts()
+        appViewModel.loadBookmarkedPosts()
+    }
+    
+    LaunchedEffect(isSignedOut) {
+        if (isSignedOut) {
+            navController.navigate("auth_graph") {
+                popUpTo("main_graph") { inclusive = true }
+                launchSingleTop = true
+            }
+        }
     }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(text = "Profile", fontWeight = FontWeight.Bold) },
-                navigationIcon = { BackToHomeButton(navController = navController) },
+                navigationIcon = { BackButton(navController = navController) },
                 actions = {
+                    IconButton(onClick = { navController.navigate("settings") }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
                     IconButton(onClick = { showSignOutDialog = true }) {
                         Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign Out", tint = Color(0xFFE91E63))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
-    ) {
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(it)
-                .background(Color.White),
+                .padding(padding)
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(24.dp))
@@ -83,7 +116,7 @@ fun ProfileScreen(
                 modifier = Modifier
                     .size(120.dp)
                     .clip(CircleShape)
-                    .background(Color.LightGray),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentScale = ContentScale.Crop
             )
 
@@ -94,7 +127,8 @@ fun ProfileScreen(
                 Text(
                     text = userProfile.displayName,
                     fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 IconButton(onClick = { newName = userProfile.displayName; showEditNameDialog = true }) {
@@ -106,24 +140,95 @@ fun ProfileScreen(
 
             // Email
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Email, contentDescription = "Email", tint = Color.Gray)
+                Icon(Icons.Default.Email, contentDescription = "Email", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = userProfile.email,
                     fontSize = 16.sp,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.secondary
                 )
             }
 
-            // Spacer to push content up
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Trust Score Card
+            TrustScoreCard(score = userProfile.trustScore)
 
-            // Sign Out Button (alternative position)
-            // Button(onClick = { showSignOutDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))) {
-            //     Text("Sign Out")
-            // }
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Stats Row
+            val postCount = when (val state = myPostsState) {
+                is PostFeedState.Success -> state.posts.size
+                else -> 0
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(text = "$postCount", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(text = "Posts", fontSize = 14.sp, color = MaterialTheme.colorScheme.secondary)
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(thickness = 0.5.dp)
+
+            // Tabs for Posts and Bookmarks
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.primary,
+                indicator = { tabPositions ->
+                    TabRowDefaults.SecondaryIndicator(
+                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                },
+                divider = {}
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Icon(Icons.Default.GridView, contentDescription = "My Posts") }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.BookmarkBorder, contentDescription = "Bookmarks") }
+                )
+            }
+
+            // Post Grid Content
+            Box(modifier = Modifier.heightIn(min = 200.dp, max = 1000.dp)) {
+                val posts = if (selectedTab == 0) {
+                    (myPostsState as? PostFeedState.Success)?.posts ?: emptyList()
+                } else {
+                    (bookmarkedPostsState as? PostFeedState.Success)?.posts ?: emptyList()
+                }
+
+                if (posts.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (selectedTab == 0) "No posts yet" else "No bookmarked posts",
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                } else {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        val chunkedPosts = posts.chunked(3)
+                        chunkedPosts.forEach { rowPosts ->
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                rowPosts.forEach { post ->
+                                    PostGridItem(post = post, modifier = Modifier.weight(1f)) {
+                                        navController.navigate("post_detail/${post.id}")
+                                    }
+                                }
+                                repeat(3 - rowPosts.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 
@@ -135,9 +240,8 @@ fun ProfileScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        FirebaseAuth.getInstance().signOut()
+                        appViewModel.signOut()
                         showSignOutDialog = false
-                        onSignOut()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
                 ) { Text("Sign Out") }
@@ -169,5 +273,38 @@ fun ProfileScreen(
             },
             dismissButton = { TextButton(onClick = { showEditNameDialog = false }) { Text("Cancel") } }
         )
+    }
+}
+
+@Composable
+fun PostGridItem(post: Post, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .padding(1.dp)
+            .clickable { onClick() }
+    ) {
+        Image(
+            painter = rememberAsyncImagePainter(post.imageUrls.firstOrNull()),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        
+        Surface(
+            modifier = Modifier
+                .padding(4.dp)
+                .align(Alignment.TopStart),
+            color = if (post.type == "FOUND") SafetyTeal else UrgentRed,
+            shape = RoundedCornerShape(4.dp)
+        ) {
+            Text(
+                text = post.type,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
     }
 }

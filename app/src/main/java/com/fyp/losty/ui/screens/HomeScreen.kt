@@ -1,9 +1,13 @@
 package com.fyp.losty.ui.screens
 
+import android.net.Uri
 import android.widget.Toast
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,7 +17,6 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -24,14 +27,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -41,14 +44,29 @@ import com.fyp.losty.ClaimEvent
 import com.fyp.losty.Post
 import com.fyp.losty.PostFeedState
 import com.fyp.losty.R
+import com.fyp.losty.claims.ClaimsViewModel
 import com.fyp.losty.ui.components.BottomNavigationBar
+import com.fyp.losty.ui.components.VerificationTipsDialog
 import com.fyp.losty.ui.theme.*
+import java.io.File
+import java.util.Calendar
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class, ExperimentalLayoutApi::class)
 @Composable
-fun HomeScreen(navController: NavController, appNavController: NavController) {
+fun HomeScreen(appNavController: NavController) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    var searchQuery by remember { mutableStateOf("") }
+    
+    // Filter states
+    var showFilterSheet by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf("All") }
+    var selectedPeriod by remember { mutableStateOf("Any time") }
+    val sheetState = rememberModalBottomSheetState()
+
     val appViewModel: AppViewModel = viewModel()
+    val claimsViewModel: ClaimsViewModel = viewModel {
+        ClaimsViewModel(appViewModel)
+    }
     val postFeedState by appViewModel.postFeedState.collectAsState()
     val isRefreshing by appViewModel.isRefreshing.collectAsState()
     val pullRefreshState = rememberPullRefreshState(isRefreshing, { appViewModel.loadAllPosts(true) })
@@ -57,41 +75,46 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
 
     LaunchedEffect(Unit) {
         appViewModel.loadUserProfile()
-        appViewModel.claimEvents.collect { event ->
+    }
+    
+    LaunchedEffect(claimsViewModel, appNavController) {
+        claimsViewModel.claimEvents.collect { event ->
             when (event) {
                 is ClaimEvent.Success -> Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
                 is ClaimEvent.Error -> Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
+                is ClaimEvent.ReportSuccess -> {
+                    Toast.makeText(context, "Report sent! Navigating to chat...", Toast.LENGTH_SHORT).show()
+                    appNavController.navigate("chat/${event.conversationId}")
+                }
             }
         }
     }
 
-    // Observe internal nav backstack to decide which bottom item should appear selected
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val navBackStackEntry by appNavController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination?.route
     val selectedRoute = when {
-        currentDestination == "home" -> "home"
+        currentDestination == "home" -> "main"
         currentDestination == "conversations" -> "chat"
         currentDestination?.startsWith("chat") == true -> "chat"
         currentDestination == "profile" -> "profile"
         currentDestination == "my_activity" -> "my_activity"
-        // When on notifications screen, keep Home selected since bottom tab was removed
         currentDestination == "manage_active_claims" -> "home"
         else -> "home"
     }
 
     Scaffold(
-        containerColor = OffWhite,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(text = "Explore", color = TextBlack) },
+                title = { Text(text = "Explore", color = MaterialTheme.colorScheme.onBackground) },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = OffWhite,
-                    scrolledContainerColor = OffWhite,
-                    titleContentColor = TextBlack
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
                 ),
                 actions = {
                     BadgedBox(badge = { if (unreadNotificationCount > 0) Badge { Text("$unreadNotificationCount") } }) {
-                        IconButton(onClick = { navController.navigate("my_activity") }) {
+                        IconButton(onClick = { appNavController.navigate("notifications") }) {
                             Icon(imageVector = Icons.Filled.Notifications, contentDescription = "Notifications", tint = ElectricPink)
                         }
                     }
@@ -101,11 +124,11 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
         bottomBar = {
             BottomNavigationBar(selectedRoute = selectedRoute, onItemSelected = { route ->
                 when (route) {
-                    "home" -> navController.navigate("home")
-                    "chat" -> navController.navigate("conversations")
+                    "home" -> appNavController.navigate("home")
+                    "chat" -> appNavController.navigate("conversations")
                     "add" -> appNavController.navigate("create_post")
-                    "my_activity" -> navController.navigate("my_activity")
-                    "profile" -> navController.navigate("profile")
+                    "my_activity" -> appNavController.navigate("my_activity")
+                    "profile" -> appNavController.navigate("profile")
                 }
             })
         }
@@ -118,7 +141,11 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
         ) {
             HeaderSection()
             Spacer(modifier = Modifier.height(16.dp))
-            SearchSection()
+            SearchSection(
+                query = searchQuery, 
+                onQueryChange = { searchQuery = it },
+                onFilterClick = { showFilterSheet = true }
+            )
             Spacer(modifier = Modifier.height(16.dp))
             TabsSection(selectedTab = selectedTab, onTabSelected = { selectedTab = it })
             Spacer(modifier = Modifier.height(16.dp))
@@ -131,14 +158,46 @@ fun HomeScreen(navController: NavController, appNavController: NavController) {
                 ) {
                     val selectedType = if (selectedTab == 0) "LOST" else "FOUND"
                     if (postFeedState is PostFeedState.Success) {
-                        val filtered = (postFeedState as PostFeedState.Success).posts.filter { it.type.equals(selectedType, ignoreCase = false) }
+                        val filtered = (postFeedState as PostFeedState.Success).posts.filter { 
+                            val matchesType = it.type.equals(selectedType, ignoreCase = false)
+                            val matchesSearch = it.title.contains(searchQuery, ignoreCase = true) || 
+                                              it.location.contains(searchQuery, ignoreCase = true) ||
+                                              it.description.contains(searchQuery, ignoreCase = true)
+                            val matchesCategory = if (selectedCategory == "All") true else it.category.equals(selectedCategory, ignoreCase = true)
+                            
+                            val matchesPeriod = when (selectedPeriod) {
+                                "Today" -> isWithinToday(it.createdAt)
+                                "Yesterday" -> isWithinYesterday(it.createdAt)
+                                "Last 7 days" -> isWithinDays(it.createdAt, 7)
+                                "Last 30 days" -> isWithinDays(it.createdAt, 30)
+                                else -> true // Any time
+                            }
+                            
+                            matchesType && matchesSearch && matchesCategory && matchesPeriod
+                        }
                         items(filtered) { post ->
-                            PostCard(post = post, navController = navController, appViewModel = appViewModel)
+                            PostCard(post = post, navController = appNavController, appViewModel = appViewModel, claimsViewModel = claimsViewModel)
                         }
                     }
                 }
                 PullRefreshIndicator(isRefreshing, pullRefreshState, Modifier.align(Alignment.TopCenter))
             }
+        }
+    }
+
+    if (showFilterSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showFilterSheet = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            FilterSheetContent(
+                selectedCategory = selectedCategory,
+                onCategorySelected = { selectedCategory = it },
+                selectedPeriod = selectedPeriod,
+                onPeriodSelected = { selectedPeriod = it },
+                onDone = { showFilterSheet = false }
+            )
         }
     }
 }
@@ -150,32 +209,36 @@ private fun HeaderSection() {
             text = "Losty",
             style = MaterialTheme.typography.headlineMedium.copy(
                 fontWeight = FontWeight.Bold,
-                // Apply gradient to text via brush in the TextStyle
                 brush = Brush.linearGradient(listOf(DeepPurple, ElectricPink))
             ),
-            // remove explicit color so brush is visible
             modifier = Modifier.padding(top = 8.dp)
         )
-        Text(text = "Lost things don’t stay lost with Losty!", color = TextGrey)
+        Text(text = "Lost things don’t stay lost with Losty!", color = MaterialTheme.colorScheme.secondary)
     }
 }
 
 @Composable
-private fun SearchSection() {
+private fun SearchSection(query: String, onQueryChange: (String) -> Unit, onFilterClick: () -> Unit) {
     OutlinedTextField(
-        value = "",
-        onValueChange = {},
+        value = query,
+        onValueChange = onQueryChange,
         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = ElectricPink) },
         trailingIcon = {
-            Icon(
-                painter = painterResource(id = R.drawable.outline_filter_alt_24),
-                contentDescription = "Filter",
-                tint = ElectricPink
-            )
+            IconButton(onClick = onFilterClick) {
+                Icon(
+                    painter = painterResource(id = R.drawable.outline_filter_alt_24),
+                    contentDescription = "Filter",
+                    tint = ElectricPink
+                )
+            }
         },
         placeholder = { Text("Search items, locations...") },
         modifier = Modifier.fillMaxWidth(),
-        singleLine = true
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedContainerColor = MaterialTheme.colorScheme.surface
+        )
     )
 }
 
@@ -188,8 +251,8 @@ private fun TabsSection(selectedTab: Int, onTabSelected: (Int) -> Unit) {
             onClick = { onTabSelected(0) },
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (lostSelected) UrgentRed else Color(0xFFF0F0F0),
-                contentColor = if (lostSelected) Color.White else TextGrey
+                containerColor = if (lostSelected) UrgentRed else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (lostSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
             )
         ) {
             Text("Lost Items", fontWeight = FontWeight.Bold)
@@ -198,8 +261,8 @@ private fun TabsSection(selectedTab: Int, onTabSelected: (Int) -> Unit) {
             onClick = { onTabSelected(1) },
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (foundSelected) SafetyTeal else Color(0xFFF0F0F0),
-                contentColor = if (foundSelected) Color.White else TextGrey
+                containerColor = if (foundSelected) SafetyTeal else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (foundSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
             )
         ) {
             Text("Found Items", fontWeight = FontWeight.Bold)
@@ -207,17 +270,170 @@ private fun TabsSection(selectedTab: Int, onTabSelected: (Int) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PostCard(post: Post, navController: NavController, appViewModel: AppViewModel) {
+private fun FilterSheetContent(
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    selectedPeriod: String,
+    onPeriodSelected: (String) -> Unit,
+    onDone: () -> Unit
+) {
+    val categories = listOf("All", "Electronics", "Wallet", "Bags", "ID/Cards", "Keys", "Pets")
+    val periods = listOf("Any time", "Today", "Yesterday", "Last 7 days", "Last 30 days")
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .padding(bottom = 32.dp)
+    ) {
+        Text("CATEGORY", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            categories.forEach { category ->
+                FilterChipItem(
+                    text = category,
+                    isSelected = selectedCategory == category,
+                    onClick = { onCategorySelected(category) },
+                    selectedColor = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("PERIOD", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            periods.forEach { period ->
+                FilterChipItem(
+                    text = period,
+                    isSelected = selectedPeriod == period,
+                    onClick = { onPeriodSelected(period) },
+                    selectedColor = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Button(
+            onClick = onDone,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("Done", modifier = Modifier.padding(vertical = 4.dp), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun FilterChipItem(
+    text: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    selectedColor: Color
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = if (isSelected) selectedColor else MaterialTheme.colorScheme.surface,
+        border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.height(36.dp)
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullscreenImage(uri: Uri, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = uri,
+            contentDescription = "Fullscreen Image",
+            modifier = Modifier.fillMaxWidth(),
+            contentScale = ContentScale.Fit
+        )
+    }
+}
+
+@Composable
+private fun PostCard(post: Post, navController: NavController, appViewModel: AppViewModel, claimsViewModel: ClaimsViewModel) {
     val context = LocalContext.current
     var creatingConversation by remember { mutableStateOf(false) }
-    val userProfile by appViewModel.userProfile.collectAsState()
     val bookmarks by appViewModel.bookmarks.collectAsState()
+    val userProfile by appViewModel.userProfile.collectAsState()
+    val isOwner = userProfile.uid == post.authorId
+    
+    // Dialog states
+    var showClaimDialog by remember { mutableStateOf(false) } // For "This is Mine!"
+    var showVerificationTips by remember { mutableStateOf(false) }
+    var showFoundReportDialog by remember { mutableStateOf(false) }
+    var showFullscreenImage by remember { mutableStateOf(false) }
+    
+    var userAnswer by remember { mutableStateOf("") }
+    var proofImageUri by remember { mutableStateOf<Uri?>(null) }
+    var fullscreenImageUri by remember { mutableStateOf<Uri?>(null) }
+
+
+    // Launcher for the GALLERY
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) proofImageUri = uri
+    }
+
+    // Launcher for the CAMERA
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (!success) proofImageUri = null
+    }
+
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+
+    fun getTempUri(): Uri {
+        val tempFile = File.createTempFile("proof_", ".jpg", context.cacheDir).apply {
+            createNewFile()
+            deleteOnExit()
+        }
+        return FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.provider",
+            tempFile
+        )
+    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,16 +443,16 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(Color.LightGray),
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentScale = ContentScale.Crop
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = post.authorName, color = TextBlack, fontWeight = FontWeight.Bold)
-                    Text(text = post.location, color = TextGrey, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = post.authorName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                    Text(text = post.location, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = {}) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More options", tint = TextGrey)
+                    Icon(Icons.Filled.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -264,9 +480,22 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
+            
+            // --- TITLE & DESCRIPTION ---
+            Text(text = post.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = post.description,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { /* TODO: Implement likes */ }) {
-                    Icon(Icons.Filled.Favorite, contentDescription = "Like", tint = TextGrey)
+                    Icon(Icons.Filled.Favorite, contentDescription = "Like", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = {
                     if (creatingConversation) return@IconButton
@@ -280,60 +509,271 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
                             postOwnerName = post.authorName
                         ) { result ->
                             creatingConversation = false
-                            if (result.isSuccess) {
-                                val conversationId = result.getOrNull() ?: run {
-                                    Toast.makeText(context, "Failed to open conversation", Toast.LENGTH_SHORT).show(); return@getOrCreateConversation
-                                }
-                                val encodedName = java.net.URLEncoder.encode(post.authorName, "utf-8")
-                                navController.navigate("chat/$conversationId?otherUserName=$encodedName")
-                            } else {
-                                Toast.makeText(context, result.exceptionOrNull()?.message ?: "Could not open conversation", Toast.LENGTH_LONG).show()
+                            result.onSuccess { convId ->
+                                navController.navigate("chat/$convId")
+                            }.onFailure {
+                                Toast.makeText(context, "Failed to start chat", Toast.LENGTH_SHORT).show()
                             }
                         }
-                    } else {
-                        navController.navigate("conversations")
                     }
                 }) {
-                    if (creatingConversation) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    } else {
-                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = TextGrey)
-                    }
+                    Icon(imageVector = Icons.AutoMirrored.Filled.Chat, contentDescription = "Message", tint = ElectricPink)
                 }
-                IconButton(onClick = {}) {
-                    Icon(Icons.Filled.Share, contentDescription = "Share", tint = TextGrey)
+                IconButton(onClick = { appViewModel.toggleBookmark(post) }) {
+                    val isBookmarked = bookmarks.contains(post.id)
+                    Icon(
+                        imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                        contentDescription = "Bookmark",
+                        tint = if (isBookmarked) ElectricPink else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-
-                if (post.type == "LOST" && post.authorId != userProfile.uid) {
-                    Button(
-                        onClick = { appViewModel.createClaim(post) },
-                        colors = ButtonDefaults.buttonColors(containerColor = SafetyTeal)
-                    ) {
-                        Text("Claim", color = Color.White)
+                
+                // ACTION BUTTON - Hidden if current user is the owner
+                if (!isOwner && post.status == "active") {
+                    if (post.type == "LOST") {
+                        Button(
+                            onClick = { showVerificationTips = true }, // Show tips first
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricPink),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("I Found This!")
+                        }
+                    } else {
+                        Button(
+                            onClick = { showClaimDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = SafetyTeal),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("This is Mine!")
+                        }
                     }
-                } else {
-                    val isBookmarked = bookmarks.contains(post.id)
-                    IconButton(onClick = { appViewModel.toggleBookmark(post) }) {
-                        Icon(
-                            imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                            contentDescription = "Bookmark",
-                            tint = if (isBookmarked) ElectricPink else TextGrey
-                        )
-                    }
+                } else if (post.status != "active") {
+                    Text(
+                        text = "Resolved",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 }
             }
-            BuildCaption(post.authorName, post.description)
-            Text(text = "", color = TextGrey, style = MaterialTheme.typography.bodySmall) // Timestamp removed for now
         }
+    }
+    
+    if (showFullscreenImage && fullscreenImageUri != null) {
+        FullscreenImage(uri = fullscreenImageUri!!, onDismiss = { showFullscreenImage = false })
+    }
+
+    // --- DIALOGS ---
+
+    // 1. Verification Tips Dialog
+    if (showVerificationTips) {
+        VerificationTipsDialog(
+            onDismiss = { showVerificationTips = false },
+            onConfirm = {
+                showVerificationTips = false
+                showFoundReportDialog = true // Open the next dialog
+            }
+        )
+    }
+
+    // 2. Found Item Report Dialog (After tips)
+    if (showFoundReportDialog) {
+        AlertDialog(
+            onDismissRequest = { showFoundReportDialog = false },
+            title = { Text("Report Found Item") },
+            text = {
+                Column {
+                    Text("Provide a brief description to help the owner, and add a photo if possible.")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = userAnswer, // Reusing userAnswer state
+                        onValueChange = { userAnswer = it },
+                        placeholder = { Text("e.g., Found near the library") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Attach photo proof (optional):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            .clickable {
+                                if (proofImageUri != null) {
+                                    fullscreenImageUri = proofImageUri
+                                    showFullscreenImage = true
+                                } else {
+                                    showImageSourceDialog = true
+                                }
+                             },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (proofImageUri != null) {
+                            AsyncImage(model = proofImageUri, contentDescription = "Proof", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.AddAPhoto, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Add Photo", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (userAnswer.isNotBlank()) {
+                            claimsViewModel.reportFoundItem(post, userAnswer, proofImageUri)
+                            showFoundReportDialog = false
+                            userAnswer = ""
+                            proofImageUri = null
+                        } else {
+                            Toast.makeText(context, "Please provide a description.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Send Report", color = ElectricPink, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showFoundReportDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    // 3. Security Question Dialog (For Claiming a "FOUND" item)
+    if (showClaimDialog) {
+        AlertDialog(
+            onDismissRequest = { showClaimDialog = false },
+            title = { Text("Claim Item") },
+            text = {
+                Column {
+                    Text("The finder has set a security question to verify ownership:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = post.securityQuestion.ifBlank { "Describe this item in detail (e.g., specific marks, contents)." },
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = userAnswer,
+                        onValueChange = { userAnswer = it },
+                        placeholder = { Text("Your answer...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Attach photo proof (optional):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            .clickable { 
+                                if (proofImageUri != null) {
+                                    fullscreenImageUri = proofImageUri
+                                    showFullscreenImage = true
+                                } else {
+                                    showImageSourceDialog = true
+                                }
+                             },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (proofImageUri != null) {
+                            AsyncImage(model = proofImageUri, contentDescription = "Proof", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.AddAPhoto, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Take/Add Photo Proof", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (userAnswer.isNotBlank()) {
+                            appViewModel.submitClaim(post = post, answer = userAnswer, proofUri = proofImageUri)
+                            showClaimDialog = false
+                            userAnswer = ""
+                            proofImageUri = null
+                        } else {
+                            Toast.makeText(context, "Please provide some detail/answer", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Submit Claim", color = SafetyTeal, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showClaimDialog = false }) { Text("Cancel") } },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Choose image source") },
+            text = {
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Camera") },
+                        leadingContent = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
+                        modifier = Modifier.clickable {
+                            val uri = getTempUri()
+                            proofImageUri = uri
+                            cameraLauncher.launch(uri)
+                            showImageSourceDialog = false
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Gallery") },
+                        leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                        modifier = Modifier.clickable {
+                            photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            showImageSourceDialog = false
+                        }
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showImageSourceDialog = false }) { Text("Cancel") } }
+        )
     }
 }
 
-@Composable
-private fun BuildCaption(username: String, caption: String) {
-    Row {
-        Text(text = username, fontWeight = FontWeight.Bold, color = TextBlack)
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(text = caption, color = TextBlack)
-    }
+// Helper functions for time filtering
+fun isWithinToday(timestamp: Long): Boolean {
+    val now = System.currentTimeMillis()
+    val calendar = Calendar.getInstance()
+    calendar.timeInMillis = now
+    calendar[Calendar.HOUR_OF_DAY] = 0
+    calendar[Calendar.MINUTE] = 0
+    calendar[Calendar.SECOND] = 0
+    calendar[Calendar.MILLISECOND] = 0
+    val startOfToday = calendar.timeInMillis
+    return timestamp >= startOfToday
+}
+
+fun isWithinYesterday(timestamp: Long): Boolean {
+    val calendar = Calendar.getInstance()
+    calendar.set(Calendar.HOUR_OF_DAY, 0)
+    calendar.set(Calendar.MINUTE, 0)
+    calendar.set(Calendar.SECOND, 0)
+    calendar.set(Calendar.MILLISECOND, 0)
+    val startOfToday = calendar.timeInMillis
+    val startOfYesterday = startOfToday - (24 * 60 * 60 * 1000)
+    return timestamp in startOfYesterday until startOfToday
+}
+
+fun isWithinDays(timestamp: Long, days: Int): Boolean {
+    val now = System.currentTimeMillis()
+    val startTime = now - (days.toLong() * 24 * 60 * 60 * 1000)
+    return timestamp >= startTime
 }

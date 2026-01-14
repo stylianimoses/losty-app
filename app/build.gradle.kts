@@ -88,6 +88,11 @@ dependencies {
     implementation("androidx.credentials:credentials-play-services-auth:1.2.2")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
 
+    // OpenStreetMap
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+    // Location Services
+    implementation("com.google.android.gms:play-services-location:21.2.0")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

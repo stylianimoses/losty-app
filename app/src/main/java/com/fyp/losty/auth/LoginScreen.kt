@@ -12,6 +12,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
@@ -20,11 +22,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -37,7 +43,6 @@ import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
-import com.fyp.losty.AppViewModel
 import com.fyp.losty.AuthState
 import com.fyp.losty.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -45,41 +50,43 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import kotlinx.coroutines.launch
 
-private val PrimaryBlue = Color(0xFF349BEB) // requested exact blue
+private val PrimaryBlue = Color(0xFF349BEB)
 private val DisabledGray = Color(0xFFDCE9F8)
-private val LoginButtonBlue = Color(0xFF9FC6FF)
 
 fun isNetworkAvailable(context: Context): Boolean {
-    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-    cm ?: return false
-    val nw = cm.activeNetwork ?: return false
-    val caps = cm.getNetworkCapabilities(nw) ?: return false
-    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val network = connectivityManager.activeNetwork ?: return false
+    val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
+    
+    return when {
+        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
+        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
+        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
+        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> true
+        else -> false
+    }
 }
 
 @Composable
-fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewModel()) {
+fun LoginScreen(navController: NavController, viewModel: LoginViewModel = viewModel()) {
     var credential by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var showResetDialog by remember { mutableStateOf(false) }
-    var resetEmail by remember { mutableStateOf("") }
 
-    val authState by appViewModel.authState.collectAsState()
+    val authState by viewModel.authState.collectAsState()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
 
-    LaunchedEffect(authState) {
-        when (val state = authState) {
-            is AuthState.Success -> {
-                navController.navigate("main_graph") {
-                    popUpTo("auth_graph") { inclusive = true }
-                    launchSingleTop = true
-                }
+    LaunchedEffect(key1 = authState) {
+        if (authState is AuthState.Success) {
+            navController.navigate("main_graph") {
+                popUpTo("auth_graph") { inclusive = true }
+                launchSingleTop = true
             }
-            is AuthState.Error -> Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
-            else -> Unit
+        } else if (authState is AuthState.Error) {
+            Toast.makeText(context, (authState as AuthState.Error).message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -94,14 +101,13 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Full-screen card with margin around it
         Card(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = BorderStroke(1.dp, Color(0xFFE6E9EE))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier
@@ -111,15 +117,13 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Top area: title + actions
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    // Title in all caps using app font
-                    Text(text = "LOSTY", fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "LOSTY", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Sign in with Google button (full width blue)
+                    // Google Sign-In Button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -128,13 +132,7 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                             .clickable(enabled = authState !is AuthState.Loading) {
                                 coroutineScope.launch {
                                     if (!isNetworkAvailable(context)) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                "No network connection. Please connect to the internet and try again.",
-                                                Toast.LENGTH_SHORT
-                                            )
-                                            .show()
+                                        Toast.makeText(context, "No internet connection.", Toast.LENGTH_SHORT).show()
                                         return@launch
                                     }
 
@@ -145,53 +143,29 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                                             .setAutoSelectEnabled(true)
                                             .build()
 
-                                        val request = GetCredentialRequest
-                                            .Builder()
+                                        val request = GetCredentialRequest.Builder()
                                             .addCredentialOption(googleIdOption)
                                             .build()
 
                                         val result = credentialManager.getCredential(context, request)
-                                        val credential = result.credential
+                                        val credentialResult = result.credential
 
-                                        if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                                        if (credentialResult is CustomCredential && credentialResult.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                                             try {
-                                                val googleIdToken =
-                                                    GoogleIdTokenCredential.createFrom(credential.data)
-                                                appViewModel.signInWithGoogle(googleIdToken.idToken)
+                                                val googleIdToken = GoogleIdTokenCredential.createFrom(credentialResult.data)
+                                                viewModel.signInWithGoogle(googleIdToken.idToken)
                                             } catch (e: GoogleIdTokenParsingException) {
-                                                Toast
-                                                    .makeText(
-                                                        context,
-                                                        "Google Sign-In failed: Could not parse token",
-                                                        Toast.LENGTH_LONG
-                                                    )
-                                                    .show()
+                                                Toast.makeText(context, "Parsing error: ${e.message}", Toast.LENGTH_LONG).show()
                                             }
                                         } else {
-                                            Toast
-                                                .makeText(
-                                                    context,
-                                                    "Google Sign-In failed: Unexpected credential type.",
-                                                    Toast.LENGTH_SHORT
-                                                )
-                                                .show()
+                                            Toast.makeText(context, "Unexpected credential type.", Toast.LENGTH_SHORT).show()
                                         }
                                     } catch (e: GetCredentialException) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                "Google Sign-In error: ${e.message ?: "Unknown error"}",
-                                                Toast.LENGTH_LONG
-                                            )
-                                            .show()
+                                        if (!e.message.toString().contains("User cancelled", ignoreCase = true)) {
+                                            Toast.makeText(context, "Sign-In Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                        }
                                     } catch (e: Exception) {
-                                        Toast
-                                            .makeText(
-                                                context,
-                                                "An unexpected error occurred: ${e.message}",
-                                                Toast.LENGTH_LONG
-                                            )
-                                            .show()
+                                        Toast.makeText(context, "An error occurred: ${e.message}", Toast.LENGTH_LONG).show()
                                     }
                                 }
                             }
@@ -212,13 +186,12 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         HorizontalDivider(modifier = Modifier.weight(1f))
-                        Text("  OR  ", style = MaterialTheme.typography.bodyLarge, color = Color.Gray)
+                        Text("  OR  ", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
                         HorizontalDivider(modifier = Modifier.weight(1f))
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Inputs
                     OutlinedTextField(
                         value = credential,
                         onValueChange = { credential = it },
@@ -228,7 +201,14 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                             .fillMaxWidth()
                             .testTag("credential_field"),
                         shape = RoundedCornerShape(8.dp),
-                        isError = credential.isNotEmpty() && !isCredentialValid
+                        isError = credential.isNotEmpty() && !isCredentialValid,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Next
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                        )
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -244,24 +224,43 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                         shape = RoundedCornerShape(8.dp),
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         trailingIcon = {
-                            val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(imageVector = image, contentDescription = "Toggle password visibility")
+                                val icon = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                                Icon(imageVector = icon, contentDescription = "Toggle password visibility")
                             }
                         },
-                        isError = password.isNotEmpty() && !isPasswordValid
+                        isError = password.isNotEmpty() && !isPasswordValid,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                focusManager.clearFocus()
+                                if (isFormComplete && authState !is AuthState.Loading) {
+                                    viewModel.loginUser(credential, password)
+                                }
+                            }
+                        )
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    TextButton(onClick = { showResetDialog = true }, modifier = Modifier.align(Alignment.End)) { Text("Forgot password?") }
+                    TextButton(
+                        onClick = { navController.navigate("reset_password") },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Forgot password?")
+                    }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
                         onClick = {
-                            if (!isNetworkAvailable(context)) Toast.makeText(context, "No network connection", Toast.LENGTH_SHORT).show()
-                            else appViewModel.loginUser(credential, password)
+                            focusManager.clearFocus()
+                            if (!isNetworkAvailable(context)) {
+                                Toast.makeText(context, "No network connection", Toast.LENGTH_SHORT).show()
+                            } else {
+                                viewModel.loginUser(credential, password)
+                            }
                         },
                         enabled = isFormComplete && authState !is AuthState.Loading,
                         modifier = Modifier
@@ -269,62 +268,36 @@ fun LoginScreen(navController: NavController, appViewModel: AppViewModel = viewM
                             .height(48.dp)
                             .testTag("login_button"),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (isFormComplete) PrimaryBlue else DisabledGray)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isFormComplete) PrimaryBlue else DisabledGray
+                        )
                     ) {
-                        Text(text = "Log In", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                        if (authState is AuthState.Loading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text(text = "Log In", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                        }
                     }
                 }
 
-                // Bottom area: sign up link
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Don\'t have an account? ")
+                    Text("Don\'t have an account? ", color = MaterialTheme.colorScheme.onSurface)
                     TextButton(onClick = { navController.navigate("register") }) {
                         Text("Sign Up")
                     }
                 }
             }
         }
-
-        if (showResetDialog) {
-            AlertDialog(
-                onDismissRequest = { showResetDialog = false },
-                title = { Text("Reset Password") },
-                text = {
-                    Column {
-                        Text("Enter the email associated with your account to receive reset instructions.")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(value = resetEmail, onValueChange = { resetEmail = it }, placeholder = { Text("Email") }, modifier = Modifier.fillMaxWidth())
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { appViewModel.sendPasswordReset(resetEmail); showResetDialog = false }) { Text("Send") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showResetDialog = false }) { Text("Cancel") }
-                }
-            )
-        }
-
-        if (authState is AuthState.Loading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-        }
     }
 }
 
-@Preview(showBackground = true, widthDp = 420)
+@Preview(showBackground = true, widthDp = 360)
 @Composable
 fun LoginScreenPreview() {
-    val navController = rememberNavController()
-    LoginScreen(navController = navController)
-}
-
-@Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES, widthDp = 420)
-@Composable
-fun LoginScreenDarkPreview() {
     val navController = rememberNavController()
     LoginScreen(navController = navController)
 }

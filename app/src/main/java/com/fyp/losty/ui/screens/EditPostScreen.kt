@@ -1,6 +1,7 @@
 package com.fyp.losty.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -10,7 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import com.fyp.losty.AppViewModel // Import the unified ViewModel
+import com.fyp.losty.AppViewModel
 import com.fyp.losty.SinglePostState
 
 @Composable
@@ -51,16 +52,16 @@ fun EditPostScreen(postId: String?, navController: NavController, appViewModel: 
             is SinglePostState.Error -> {
                 Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
             }
-            is SinglePostState.Idle -> {
-                // Show a loading indicator while the post is being fetched
-            }
-            is SinglePostState.Loading -> {
-                // Show a loading indicator while the post is being updated
-            }
+            else -> Unit
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
         if (postState is SinglePostState.Loading || postState is SinglePostState.Idle) {
             CircularProgressIndicator()
         }
@@ -70,13 +71,50 @@ fun EditPostScreen(postId: String?, navController: NavController, appViewModel: 
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth(), maxLines = 5)
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 5,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Location") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text("Location") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
                 Spacer(modifier = Modifier.weight(1f))
                 Button(
                     onClick = { appViewModel.updatePost(postId, title, description, category, location) },
