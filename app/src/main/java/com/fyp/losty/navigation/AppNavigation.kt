@@ -12,6 +12,7 @@ import com.fyp.losty.AppViewModel
 import com.fyp.losty.auth.LoginScreen
 import com.fyp.losty.auth.RegisterScreen
 import com.fyp.losty.auth.ResetPasswordScreen
+import com.fyp.losty.ui.components.LocationPickerMap
 import com.fyp.losty.ui.screens.*
 import com.google.firebase.auth.FirebaseAuth
 
@@ -55,6 +56,18 @@ fun AppNavigation(appViewModel: AppViewModel = viewModel()) {
                 val conversationId = backStackEntry.arguments?.getString("conversationId") ?: ""
                 val otherNameArg = backStackEntry.arguments?.getString("otherUserName")?.takeIf { it.isNotBlank() }
                 ChatScreen(conversationId = conversationId, navController = navController, otherUserNameArg = otherNameArg)
+            }
+
+            composable("location_picker") {
+                LocationPickerMap(
+                    onLocationConfirmed = { address ->
+                        // Save address to previous backstack entry to send data back
+                        navController.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.set("location_data", address)
+                        navController.popBackStack()
+                    }
+                )
             }
 
             composable("my_activity") { MyActivityScreen(navController = navController) }

@@ -9,9 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +41,7 @@ fun PostDetailScreen(
 ) {
     val postState by appViewModel.postToEditState.collectAsState()
     val bookmarks by appViewModel.bookmarks.collectAsState()
+    val userProfile by appViewModel.userProfile.collectAsState()
     val context = LocalContext.current
     var creatingConversation by remember { mutableStateOf(false) }
 
@@ -147,6 +146,25 @@ fun PostDetailScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val isLiked = userProfile.uid in post.likes
+                                IconButton(onClick = { appViewModel.toggleLike(post.id) }) {
+                                    Icon(
+                                        imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                        contentDescription = "Like",
+                                        tint = if (isLiked) ElectricPink else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (post.likes.isNotEmpty()) {
+                                    Text(
+                                        text = "${post.likes.size}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
                             IconButton(onClick = { appViewModel.toggleBookmark(post) }) {
                                 val isBookmarked = bookmarks.contains(post.id)
                                 Icon(
@@ -196,6 +214,11 @@ fun PostDetailScreen(
 }
 
 fun formatDate(timestamp: Long): String {
+    val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
+    return formatDateString(timestamp)
+}
+
+fun formatDateString(timestamp: Long): String {
     val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
     return sdf.format(java.util.Date(timestamp))
 }

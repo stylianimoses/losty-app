@@ -20,7 +20,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -28,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -49,14 +55,14 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import com.fyp.losty.ui.theme.DeepPurple
+import com.fyp.losty.ui.theme.ElectricPink
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import kotlinx.coroutines.launch
 
-private val PrimaryBlue = Color(0xFF349BEB)
-private val DisabledGray = Color(0xFFDCE9F8)
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(navController: NavController, viewModel: RegisterViewModel = viewModel()) {
     var email by remember { mutableStateOf("") }
@@ -100,245 +106,289 @@ fun RegisterScreen(navController: NavController, viewModel: RegisterViewModel = 
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Card(
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                .padding(innerPadding)
+                .padding(horizontal = 24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
+            Text(
+                text = "Create Account",
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontWeight = FontWeight.Black,
+                    brush = Brush.linearGradient(listOf(DeepPurple, ElectricPink))
+                )
+            )
+            Text(
+                text = "Join Losty and start finding!",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Profile Image Picker
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
+                    .size(100.dp)
+                    .clickable { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                    .testTag("profile_image_picker"),
+                contentAlignment = Alignment.BottomEnd
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "LOSTY", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("social_button")
-                            .clickable(enabled = authState !is AuthState.Loading) {
-                                coroutineScope.launch {
-                                    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                                    val isConnected = cm.activeNetwork?.let {
-                                        cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                                    } ?: false
-
-                                    if (!isConnected) {
-                                        Toast.makeText(context, "No internet connection.", Toast.LENGTH_SHORT).show()
-                                        return@launch
-                                    }
-
-                                    try {
-                                        val googleIdOption = GetGoogleIdOption.Builder()
-                                            .setFilterByAuthorizedAccounts(false)
-                                            .setServerClientId(context.getString(R.string.default_web_client_id))
-                                            .setAutoSelectEnabled(true)
-                                            .build()
-
-                                        val request = GetCredentialRequest.Builder()
-                                            .addCredentialOption(googleIdOption)
-                                            .build()
-
-                                        val result = credentialManager.getCredential(context, request)
-                                        val credential = result.credential
-
-                                        if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                                            try {
-                                                val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data)
-                                                viewModel.signInWithGoogle(googleIdToken.idToken)
-                                            } catch (e: GoogleIdTokenParsingException) {
-                                                Toast.makeText(context, "Parsing error: ${e.message}", Toast.LENGTH_LONG).show()
-                                            }
-                                        } else {
-                                            Toast.makeText(context, "Unexpected credential type.", Toast.LENGTH_SHORT).show()
-                                        }
-                                    } catch (e: GetCredentialException) {
-                                        Log.e("RegisterScreen", "Sign In failed: ${e.message}")
-                                        if (!e.message.toString().contains("User cancelled")) {
-                                            Toast.makeText(context, "Sign In Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            }
-                            .background(PrimaryBlue, shape = RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.google_icon),
-                            contentDescription = "Social",
-                            modifier = Modifier.size(28.dp)
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(2.dp, ElectricPink.copy(alpha = 0.5f))
+                ) {
+                    if (selectedImageUri != null) {
+                        AsyncImage(
+                            model = selectedImageUri,
+                            contentDescription = "Profile Picture",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(text = "Sign up with Google", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        HorizontalDivider(modifier = Modifier.weight(1f))
-                        Text("  OR  ", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
-                        HorizontalDivider(modifier = Modifier.weight(1f))
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .size(96.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                            .testTag("profile_image_picker"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (selectedImageUri != null) {
-                            AsyncImage(
-                                model = selectedImageUri,
-                                contentDescription = "Profile Picture",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.CameraAlt,
-                                contentDescription = "Add profile picture",
+                                contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(32.dp)
                             )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        placeholder = { Text("Email") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("contact_field"),
-                        shape = RoundedCornerShape(8.dp),
-                        isError = email.isNotEmpty() && !isEmailValid,
-                        supportingText = { 
-                            if (email.isNotEmpty() && !isEmailValid) {
-                                Text("A verification link will be sent to this email.")
-                            } else {
-                                Text(" ")
-                            }
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = fullName,
-                        onValueChange = { fullName = it },
-                        placeholder = { Text("Full Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        isError = fullName.isNotBlank() && fullName.length < 2,
-                        supportingText = { 
-                            if (fullName.isNotBlank() && fullName.length < 2) {
-                                Text("Full name must be at least 2 characters.")
-                            } else {
-                                Text(" ")
-                            }
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        placeholder = { Text("Username") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        isError = username.isNotBlank() && username.length < 3,
-                        supportingText = { 
-                            if (username.isNotBlank() && username.length < 3) {
-                                Text("Username must be at least 3 characters.")
-                            } else {
-                                Text(" ")
-                            }
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        placeholder = { Text("Password") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                val icon = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
-                                Icon(imageVector = icon, contentDescription = "Toggle password visibility")
-                            }
-                        },
-                        isError = password.isNotBlank() && !isPasswordValid,
-                        supportingText = { 
-                            if (password.isNotEmpty() && !isPasswordValid) {
-                                Text("Password must be at least 8 characters")
-                            } else {
-                                Text(" ")
-                            }
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Button(
-                        onClick = {
-                            viewModel.registerUser(
-                                email = email,
-                                fullName = fullName,
-                                username = username,
-                                password = password,
-                                imageUri = selectedImageUri
-                            )
-                        },
-                        enabled = isFormComplete && authState !is AuthState.Loading,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (isFormComplete) PrimaryBlue else DisabledGray)
-                    ) {
-                        if (authState is AuthState.Loading) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
-                        } else {
-                            Text(text = "Sign Up", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
                         }
                     }
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    color = ElectricPink,
+                    shape = CircleShape,
+                    modifier = Modifier.size(30.dp),
+                    shadowElevation = 4.dp
                 ) {
-                    Text("Have an account? ", color = MaterialTheme.colorScheme.onSurface)
-                    TextButton(onClick = { navController.navigate("login") }) {
-                        Text("Log In")
-                    }
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(6.dp)
+                    )
                 }
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Form Fields
+            AuthTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                label = "Full Name",
+                placeholder = "John Doe",
+                leadingIcon = Icons.Default.Person
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+
+            AuthTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = "Username",
+                placeholder = "johndoe123",
+                leadingIcon = Icons.Default.AlternateEmail
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            AuthTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = "Email",
+                placeholder = "john@example.com",
+                leadingIcon = Icons.Default.Email,
+                isError = email.isNotEmpty() && !isEmailValid
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            AuthTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = "Password",
+                placeholder = "••••••••",
+                leadingIcon = Icons.Default.Lock,
+                isPassword = true,
+                passwordVisible = passwordVisible,
+                onPasswordToggle = { passwordVisible = !passwordVisible },
+                isError = password.isNotEmpty() && !isPasswordValid
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = {
+                    viewModel.registerUser(
+                        email = email,
+                        fullName = fullName,
+                        username = username,
+                        password = password,
+                        imageUri = selectedImageUri
+                    )
+                },
+                enabled = isFormComplete && authState !is AuthState.Loading,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = DeepPurple,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                if (authState is AuthState.Loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                } else {
+                    Text(text = "Create Account", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                Text("  or sign up with  ", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Google Sign Up
+            OutlinedButton(
+                onClick = {
+                    coroutineScope.launch {
+                        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                        val isConnected = cm.activeNetwork?.let {
+                            cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        } ?: false
+
+                        if (!isConnected) {
+                            Toast.makeText(context, "No internet connection.", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        try {
+                            val googleIdOption = GetGoogleIdOption.Builder()
+                                .setFilterByAuthorizedAccounts(false)
+                                .setServerClientId(context.getString(R.string.default_web_client_id))
+                                .setAutoSelectEnabled(true)
+                                .build()
+
+                            val request = GetCredentialRequest.Builder()
+                                .addCredentialOption(googleIdOption)
+                                .build()
+
+                            val result = credentialManager.getCredential(context, request)
+                            val credential = result.credential
+
+                            if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                                val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data)
+                                viewModel.signInWithGoogle(googleIdToken.idToken)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("RegisterScreen", "Google Sign Up failed: ${e.message}")
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.google_icon),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(text = "Google", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Already have an account? ", color = MaterialTheme.colorScheme.secondary)
+                TextButton(onClick = { navController.navigate("login") }) {
+                    Text("Log In", color = ElectricPink, fontWeight = FontWeight.Bold)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun AuthTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    isPassword: Boolean = false,
+    passwordVisible: Boolean = false,
+    onPasswordToggle: () -> Unit = {},
+    isError: Boolean = false
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.outline) },
+            leadingIcon = { Icon(leadingIcon, contentDescription = null, tint = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) },
+            trailingIcon = if (isPassword) {
+                {
+                    IconButton(onClick = onPasswordToggle) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+            } else null,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            singleLine = true,
+            isError = isError,
+            visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                focusedBorderColor = ElectricPink,
+                errorBorderColor = MaterialTheme.colorScheme.error
+            )
+        )
     }
 }
 

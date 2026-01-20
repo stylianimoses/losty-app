@@ -4,8 +4,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +19,7 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
@@ -76,6 +79,10 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
+    // Fullscreen image state
+    var showFullscreenImage by remember { mutableStateOf(false) }
+    var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
+
     // Image Picker Launcher
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -95,7 +102,7 @@ fun ChatScreen(
     val pullRefreshState = rememberPullRefreshState(refreshing = isRefreshing, onRefresh = ::refresh)
 
     LaunchedEffect(conversationId) {
-        appViewModel.loadConversations() // Ensure conversation data is loaded for context
+        appViewModel.loadConversations() 
         appViewModel.loadMessages(conversationId)
     }
 
@@ -111,6 +118,7 @@ fun ChatScreen(
     }
 
     var optionsExpanded by remember { mutableStateOf(false) }
+    var messageToDelete by remember { mutableStateOf<Message?>(null) }
 
     Scaffold(
         topBar = {
@@ -219,7 +227,7 @@ fun ChatScreen(
 
             Box(
                 modifier = Modifier
-                    .weight(1f) // Make the chat list take up remaining space
+                    .weight(1f) 
                     .pullRefresh(pullRefreshState)
             ) {
                 when (val state = messagesState) {
@@ -238,7 +246,16 @@ fun ChatScreen(
                             items(state.messages) { message ->
                                 MessageBubble(
                                     message = message,
-                                    isCurrentUser = message.senderId == currentUserId
+                                    isCurrentUser = message.senderId == currentUserId,
+                                    onImageClick = {
+                                        fullscreenImageUrl = message.imageUrl
+                                        showFullscreenImage = true
+                                    },
+                                    onLongClick = {
+                                        if (message.senderId == currentUserId) {
+                                            messageToDelete = message
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -252,6 +269,58 @@ fun ChatScreen(
                     contentColor = ElectricPink
                 )
             }
+        }
+    }
+
+    if (showFullscreenImage && fullscreenImageUrl != null) {
+        ChatFullscreenImage(url = fullscreenImageUrl!!, onDismiss = { showFullscreenImage = false })
+    }
+
+    if (messageToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { messageToDelete = null },
+            title = { Text("Delete Message?") },
+            text = { Text("Are you sure you want to delete this message? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        messageToDelete?.let { appViewModel.deleteMessage(it.id) }
+                        messageToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { messageToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun ChatFullscreenImage(url: String, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.9f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = url,
+            contentDescription = "Fullscreen Image",
+            modifier = Modifier.fillMaxWidth(),
+            contentScale = ContentScale.Fit
+        )
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+        ) {
+            Icon(Icons.Default.MoreVert, contentDescription = "Close", tint = Color.White) // Using MoreVert as dummy close or just relying on click
         }
     }
 }
@@ -317,8 +386,14 @@ fun ChatInputBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageBubble(message: Message, isCurrentUser: Boolean) {
+fun MessageBubble(
+    message: Message, 
+    isCurrentUser: Boolean,
+    onImageClick: () -> Unit = {},
+    onLongClick: () -> Unit = {}
+) {
     val bubbleColor = if (isCurrentUser) ElectricPink else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isCurrentUser) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -336,7 +411,12 @@ fun MessageBubble(message: Message, isCurrentUser: Boolean) {
         Surface(
             color = bubbleColor,
             shape = bubbleShape,
-            modifier = Modifier.widthIn(max = 280.dp),
+            modifier = Modifier
+                .widthIn(max = 280.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongClick
+                ),
             shadowElevation = 1.dp
         ) {
             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
@@ -347,7 +427,8 @@ fun MessageBubble(message: Message, isCurrentUser: Boolean) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 300.dp)
-                            .clip(RoundedCornerShape(12.dp)),
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(onClick = onImageClick),
                         contentScale = ContentScale.Crop
                     )
                     if (message.text.isNotBlank()) Spacer(modifier = Modifier.height(8.dp))

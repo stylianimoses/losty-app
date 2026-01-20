@@ -12,6 +12,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -33,10 +34,10 @@ data class Post(
     val createdAt: Long = 0L,
     val status: String = "",
     val type: String = "",
-    // --- NEW SECURITY FIELDS ---
     val requiresSecurityCheck: Boolean = false,
     val securityQuestion: String = "",
-    val securityAnswer: String = ""
+    val securityAnswer: String = "",
+    val likes: List<String> = emptyList() // User IDs who liked the post
 )
 
 data class UserProfile(
@@ -45,7 +46,8 @@ data class UserProfile(
     val email: String = "",
     val photoUrl: String = "",
     val trustScore: Int = 0,
-    val itemsReturned: Int = 0
+    val itemsReturned: Int = 0,
+    val fcmToken: String = ""
 )
 
 data class Claim(
@@ -60,7 +62,7 @@ data class Claim(
     val answer: String = "",
     val proofImageUrl: String? = null,
     val verificationScore: Int = 0,
-    val securityQuestion: String = "" // Added to persist the question asked
+    val securityQuestion: String = ""
 )
 
 data class Notification(
@@ -72,25 +74,37 @@ data class Notification(
     val postId: String = "",
     val claimId: String = "",
     val timestamp: Long = 0L,
-    val conversationId: String = "" // Added to support navigation to chat
+    val conversationId: String = ""
 )
 
-// Updated Message Data Class to include conversationId and imageUrl
 data class Message(
     val id: String = "",
     val conversationId: String = "",
     val senderId: String = "",
     val senderName: String = "",
     val text: String = "",
-    val imageUrl: String? = null, // New field for image messages
+    val imageUrl: String? = null,
     val timestamp: Long = 0L,
     val read: Boolean = false
 )
 
-data class Conversation(val id: String = "", val postId: String = "", val postTitle: String = "", val postImageUrl: String = "", val participant1Id: String = "", val participant1Name: String = "", val participant2Id: String = "", val participant2Name: String = "", val lastMessage: String = "", val lastMessageTime: Long = 0L, val unreadCount: Int = 0)
+data class Conversation(
+    val id: String = "",
+    val postId: String = "",
+    val postTitle: String = "",
+    val postImageUrl: String = "",
+    val participant1Id: String = "",
+    val participant1Name: String = "",
+    val participant2Id: String = "",
+    val participant2Name: String = "",
+    val lastMessage: String = "",
+    val lastMessageTime: Long = 0L,
+    val unreadCount: Int = 0,
+    val deletedBy: List<String> = emptyList()
+)
 
 data class NotificationSettings(
-    val enabled: Boolean = true // Simplified to a single global toggle
+    val enabled: Boolean = true
 )
 
 // --- STATE HOLDERS ---
@@ -121,8 +135,8 @@ class AppViewModel : ViewModel() {
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
     private val storage: FirebaseStorage = FirebaseStorage.getInstance()
+    private val messaging: FirebaseMessaging = FirebaseMessaging.getInstance()
 
-    // --- THEME STATE ---
     private val _isDarkTheme = MutableStateFlow(false)
     val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
 
@@ -130,7 +144,6 @@ class AppViewModel : ViewModel() {
         _isDarkTheme.value = !_isDarkTheme.value
     }
 
-    // --- STATES & EVENTS ---
     val authState = MutableStateFlow<AuthState>(AuthState.Idle)
     private val _authEvent = MutableSharedFlow<AuthResult>()
     val authEvent = _authEvent.asSharedFlow()
@@ -154,17 +167,11 @@ class AppViewModel : ViewModel() {
     private var unreadNotificationListener: ListenerRegistration? = null
     private var allNotificationsListener: ListenerRegistration? = null
 
-    // New state to signal sign-out completion for LaunchedEffect
     private val _isSignedOut = MutableStateFlow(false)
     val isSignedOut: StateFlow<Boolean> = _isSignedOut.asStateFlow()
 
     val notificationSettings = MutableStateFlow(NotificationSettings())
 
-    // --- SCORING SCHEME LOGIC ---
-    /**
-     * Calculates a trust score based on how well the claimant's answer matches 
-     * the owner's predefined security answer and the presence of photo proof.
-     */
     private fun calculateVerificationScore(
         userAnswer: String, 
         correctAnswer: String, 
@@ -174,26 +181,21 @@ class AppViewModel : ViewModel() {
         val claimText = userAnswer.lowercase().trim()
         val actualAnswer = correctAnswer.lowercase().trim()
 
-        // 1. Exact or Keyword Matching (Max 80 points)
         if (claimText.contains(actualAnswer) && actualAnswer.isNotEmpty()) {
-            // High reward for containing the exact answer string
             score += 80
         } else {
-            // Breakdown matching: Split the correct answer into keywords (e.g., "Blue Fossil Wallet")
             val keywords = actualAnswer.split(" ", ",", ".").filter { it.length > 2 }
             if (keywords.isNotEmpty()) {
                 val matches = keywords.count { claimText.contains(it) }
                 val matchPercentage = matches.toFloat() / keywords.size
-                score += (matchPercentage * 70).toInt() // Up to 70 points for partial keyword matches
+                score += (matchPercentage * 70).toInt()
             }
         }
 
-        // 2. Photo Evidence (Bonus 20 points)
         if (hasPhotoProof) {
             score += 20
         }
 
-        // 3. Length/Detail Bonus (Small nudge for effort)
         if (claimText.length > actualAnswer.length + 10) {
             score += 10
         }
@@ -201,8 +203,6 @@ class AppViewModel : ViewModel() {
         return score.coerceAtMost(100)
     }
 
-    // --- BOOKMARK CACHE ---
-    // Holds the set of postIds the current user has bookmarked
     val bookmarks = MutableStateFlow<Set<String>>(emptySet())
 
     init {
@@ -216,13 +216,24 @@ class AppViewModel : ViewModel() {
                 loadNotificationSettings()
                 listenForUnreadNotifications()
                 listenForAllNotifications()
-                // Reset sign out flag if the user logs back in
+                updateFcmToken()
                 _isSignedOut.value = false 
             }
         }
     }
 
-    // --- AUTH ---
+    private fun updateFcmToken() = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: return@launch
+        try {
+            val token = messaging.token.await()
+            firestore.collection("users").document(userId)
+                .update("fcmToken", token)
+                .await()
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "Failed to update FCM token", e)
+        }
+    }
+
     fun sendPasswordReset(email: String) = viewModelScope.launch {
         authState.value = AuthState.Loading
         try {
@@ -237,22 +248,25 @@ class AppViewModel : ViewModel() {
     
     fun signOut() = viewModelScope.launch {
         try {
+            val userId = auth.currentUser?.uid
+            if (userId != null) {
+                firestore.collection("users").document(userId)
+                    .update("fcmToken", FieldValue.delete())
+                    .await()
+            }
+            
             auth.signOut()
-            _isSignedOut.value = true // Signal successful sign-out
-            // Reset local states to prepare for the next user or state
+            _isSignedOut.value = true
             authState.value = AuthState.Idle
             userProfile.value = UserProfile()
             bookmarks.value = emptySet()
-            // Important: Clear listeners if they were attached
             unreadNotificationListener?.remove()
             allNotificationsListener?.remove()
         } catch (e: Exception) {
-            // Handle error, though signOut rarely fails in this way
             Log.e("AppViewModel", "Sign out failed: ${e.message}")
         }
     }
 
-    // --- PROFILE ---
     fun loadUserProfile() = viewModelScope.launch {
         val firebaseUser = auth.currentUser ?: return@launch
         try {
@@ -263,7 +277,8 @@ class AppViewModel : ViewModel() {
                 email = firebaseUser.email ?: (userDoc.getString("email") ?: "No email found"),
                 photoUrl = firebaseUser.photoUrl?.toString() ?: (userDoc.getString("photoUrl") ?: ""),
                 trustScore = userDoc.getLong("trustScore")?.toInt() ?: 0,
-                itemsReturned = userDoc.getLong("itemsReturned")?.toInt() ?: 0
+                itemsReturned = userDoc.getLong("itemsReturned")?.toInt() ?: 0,
+                fcmToken = userDoc.getString("fcmToken") ?: ""
             )
         } catch (e: Exception) { /* Handle error */ }
     }
@@ -271,23 +286,42 @@ class AppViewModel : ViewModel() {
     fun updateDisplayName(newName: String) = viewModelScope.launch {
         val user = auth.currentUser ?: run { authState.value = AuthState.Error("Not logged in"); return@launch }
         try {
-            // Update Firebase Auth profile displayName
             val profileUpdates = UserProfileChangeRequest.Builder().setDisplayName(newName).build()
             user.updateProfile(profileUpdates).await()
 
-            // Update Firestore users doc
             firestore.collection("users").document(user.uid)
                 .update(mapOf("username" to newName))
                 .await()
 
-            // Refresh local userProfile state
             loadUserProfile()
         } catch (e: Exception) {
             authState.value = AuthState.Error(e.message ?: "Failed to update name")
         }
     }
 
-    // --- NOTIFICATION SETTINGS ---
+    fun updateProfilePicture(uri: Uri) = viewModelScope.launch {
+        val user = auth.currentUser ?: run { authState.value = AuthState.Error("Not logged in"); return@launch }
+        try {
+            val ref = storage.reference.child("profile_pictures/${user.uid}.jpg")
+            ref.putFile(uri).await()
+            val downloadUrl = ref.downloadUrl.await().toString()
+
+            val profileUpdates = UserProfileChangeRequest.Builder()
+                .setPhotoUri(Uri.parse(downloadUrl))
+                .build()
+            user.updateProfile(profileUpdates).await()
+
+            firestore.collection("users").document(user.uid)
+                .update(mapOf("photoUrl" to downloadUrl))
+                .await()
+
+            loadUserProfile()
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "Failed to update profile picture: ${e.message}")
+            authState.value = AuthState.Error("Failed to upload image.")
+        }
+    }
+
     fun loadNotificationSettings() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: return@launch
         try {
@@ -298,14 +332,11 @@ class AppViewModel : ViewModel() {
                     notificationSettings.value = settings
                 }
             } else {
-                // Initialize default
                 val defaultSettings = NotificationSettings()
                 firestore.collection("users").document(userId).collection("settings").document("notifications").set(defaultSettings).await()
                 notificationSettings.value = defaultSettings
             }
-        } catch (e: Exception) {
-            // Fallback to defaults on error
-        }
+        } catch (e: Exception) { }
     }
 
     fun updateNotificationSettings(settings: NotificationSettings) = viewModelScope.launch {
@@ -314,7 +345,6 @@ class AppViewModel : ViewModel() {
             firestore.collection("users").document(userId).collection("settings").document("notifications").set(settings).await()
             notificationSettings.value = settings
             
-            // Re-evaluate listeners based on new settings
             if (settings.enabled) {
                 listenForUnreadNotifications()
                 listenForAllNotifications()
@@ -323,12 +353,9 @@ class AppViewModel : ViewModel() {
                 allNotificationsListener?.remove()
                 _unreadNotificationCount.value = 0
             }
-        } catch (e: Exception) {
-            // Handle error silently or expose
-        }
+        } catch (e: Exception) { }
     }
 
-    // --- POSTS ---
     fun loadAllPosts(isRefresh: Boolean = false) = viewModelScope.launch {
         if (isRefresh) _isRefreshing.value = true
         else postFeedState.value = PostFeedState.Loading
@@ -368,7 +395,8 @@ class AppViewModel : ViewModel() {
                 type = doc.getString("type") ?: "LOST",
                 requiresSecurityCheck = doc.getBoolean("requiresSecurityCheck") ?: false,
                 securityQuestion = doc.getString("securityQuestion") ?: "",
-                securityAnswer = doc.getString("securityAnswer") ?: ""
+                securityAnswer = doc.getString("securityAnswer") ?: "",
+                likes = (doc.get("likes") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             )
         } catch (e: Exception) {
             Log.e("AppViewModel", "Failed to parse post ${doc.id}", e)
@@ -411,8 +439,6 @@ class AppViewModel : ViewModel() {
                 return@launch
             }
 
-            // Note: In a production app with many bookmarks, you should use chunked queries.
-            // Firestore 'whereIn' is limited to 10 elements.
             val posts = mutableListOf<Post>()
             for (postId in postIds) {
                 val postDoc = firestore.collection("posts").document(postId).get().await()
@@ -461,7 +487,6 @@ class AppViewModel : ViewModel() {
         val userName = userProfile.value.displayName
         val userImageUrl = userProfile.value.photoUrl
         try {
-            // Step 1: Upload images and build post data (including required "type")
             val imageUrls = mutableListOf<String>()
             for (uri in imageUris) {
                 val refPath = "post_images/$userId/${UUID.randomUUID()}"
@@ -471,12 +496,7 @@ class AppViewModel : ViewModel() {
                     val downloadUrl = ref.downloadUrl.await().toString()
                     imageUrls.add(downloadUrl)
                 } catch (e: Exception) {
-                    val msg = e.message ?: "Upload failed"
-                    if (msg.contains("PERMISSION_DENIED", ignoreCase = true) || msg.contains("permission", ignoreCase = true)) {
-                        createPostState.value = SinglePostState.Error("Permission denied: you don't have access to upload photos")
-                    } else {
-                        createPostState.value = SinglePostState.Error(msg)
-                    }
+                    createPostState.value = SinglePostState.Error(e.message ?: "Upload failed")
                     return@launch
                 }
             }
@@ -490,23 +510,20 @@ class AppViewModel : ViewModel() {
                 "authorId" to userId,
                 "authorName" to userName,
                 "authorImageUrl" to userImageUrl,
-                "type" to type, // Must be present to distinguish LOST vs FOUND
+                "type" to type,
                 "createdAt" to System.currentTimeMillis(),
                 "status" to "active",
                 "requiresSecurityCheck" to requiresSecurityCheck,
                 "securityQuestion" to securityQuestion,
-                "securityAnswer" to securityAnswer
+                "securityAnswer" to securityAnswer,
+                "likes" to emptyList<String>()
             )
 
-            // Step 2: Save to Firestore and await success
             val newPostRef = firestore.collection("posts").add(postData).await()
             val newPostId = newPostRef.id
 
-            // Step 2.5: Perfect Match Logic (Client-side Simulation)
-            // If this is a "FOUND" post, find "LOST" posts with same category and notify authors.
             if (type == "FOUND") {
                 try {
-                    // Query for potential matches
                     val matches = firestore.collection("posts")
                         .whereEqualTo("type", "LOST")
                         .whereEqualTo("category", category)
@@ -515,10 +532,7 @@ class AppViewModel : ViewModel() {
                         .await()
 
                     for (doc in matches.documents) {
-                        val lostPostId = doc.id
                         val lostAuthorId = doc.getString("authorId") ?: continue
-                        
-                        // Don't notify yourself
                         if (lostAuthorId == userId) continue
 
                         val notifId = UUID.randomUUID().toString()
@@ -528,7 +542,7 @@ class AppViewModel : ViewModel() {
                             fromUserName = "Losty Match",
                             message = "A new '$category' post was found near $location. Is this yours?",
                             isRead = false,
-                            postId = newPostId, // Link to the new FOUND post
+                            postId = newPostId,
                             timestamp = System.currentTimeMillis()
                         )
                         
@@ -540,14 +554,33 @@ class AppViewModel : ViewModel() {
                 }
             }
 
-            // Step 3: Immediately refresh the feed using one-shot fetching
             loadAllPosts()
             loadMyPosts()
-
-            // Step 4: After reload, update state to close the screen
             createPostState.value = SinglePostState.Updated
         } catch (e: Exception) {
             createPostState.value = SinglePostState.Error(e.message ?: "An unknown error occurred.")
+        }
+    }
+
+    fun toggleLike(postId: String) = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: return@launch
+        try {
+            val postRef = firestore.collection("posts").document(postId)
+            val postDoc = postRef.get().await()
+            val likes = (postDoc.get("likes") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+
+            if (userId in likes) {
+                postRef.update("likes", FieldValue.arrayRemove(userId)).await()
+            } else {
+                postRef.update("likes", FieldValue.arrayUnion(userId)).await()
+            }
+            
+            // Refresh feeds to show updated like count
+            loadAllPosts()
+            loadMyPosts()
+            loadBookmarkedPosts()
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "Toggle like failed: ${e.message}")
         }
     }
 
@@ -563,24 +596,19 @@ class AppViewModel : ViewModel() {
         try {
             post.imageUrls.forEach { storage.getReferenceFromUrl(it).delete().await() }
             firestore.collection("posts").document(post.id).delete().await()
-        } catch (e: Exception) { /* Handle error */ }
+        } catch (e: Exception) { }
     }
 
-    // --- CASE RESOLUTION ---
     fun resolvePost(postId: String) = viewModelScope.launch {
         try {
             firestore.collection("posts").document(postId)
                 .update("status", "RESOLVED")
                 .await()
-            // Refresh local state
             loadMyPosts()
             loadAllPosts()
-        } catch (e: Exception) {
-            Log.e("AppViewModel", "Failed to resolve post: ${e.message}")
-        }
+        } catch (e: Exception) { }
     }
 
-    // --- TRUST SCORE LOGIC ---
     fun finalizeReturn(claimerId: String) = viewModelScope.launch {
         try {
             val userRef = firestore.collection("users").document(claimerId)
@@ -590,13 +618,10 @@ class AppViewModel : ViewModel() {
                     "itemsReturned" to FieldValue.increment(1)
                 )
             ).await()
-            // If the current user is the claimer, refresh profile
             if (auth.currentUser?.uid == claimerId) {
                 loadUserProfile()
             }
-        } catch (e: Exception) {
-            Log.e("TrustScore", "Failed to increment score", e)
-        }
+        } catch (e: Exception) { }
     }
 
     fun penalizeFalseClaim(claimerId: String) = viewModelScope.launch {
@@ -606,16 +631,9 @@ class AppViewModel : ViewModel() {
             if (auth.currentUser?.uid == claimerId) {
                 loadUserProfile()
             }
-        } catch (e: Exception) {
-            Log.e("TrustScore", "Failed to penalize score", e)
-        }
+        } catch (e: Exception) { }
     }
 
-    // --- CLAIMS ---
-    
-    /**
-     * Submits a claim for a post, calculates verification score, and sends notification.
-     */
     fun submitClaim(
         post: Post,
         answer: String,
@@ -625,7 +643,6 @@ class AppViewModel : ViewModel() {
         val claimId = UUID.randomUUID().toString()
         
         try {
-            // Prevent duplicate claims
             val existingClaims = firestore.collection("claims")
                 .whereEqualTo("postId", post.id)
                 .whereEqualTo("claimerId", currentUser.uid)
@@ -639,21 +656,18 @@ class AppViewModel : ViewModel() {
 
             var finalProofUrl: String? = null
 
-            // 1. Upload Photo Proof to Firebase Storage
             if (proofUri != null) {
                 val ref = storage.reference.child("proofs/$claimId.jpg")
                 ref.putFile(proofUri).await()
                 finalProofUrl = ref.downloadUrl.await().toString()
             }
 
-            // 2. Dynamic Scoring against the Post's securityAnswer
             val score = calculateVerificationScore(
                 userAnswer = answer,
                 correctAnswer = post.securityAnswer,
                 hasPhotoProof = finalProofUrl != null
             )
 
-            // 3. Prepare Claim Document
             val claimData = Claim(
                 id = claimId,
                 postId = post.id,
@@ -671,7 +685,6 @@ class AppViewModel : ViewModel() {
 
             firestore.collection("claims").document(claimId).set(claimData).await()
             
-            // 4. Notification Logic
             sendNotification(
                 recipientId = post.authorId,
                 type = "CLAIM",
@@ -713,9 +726,7 @@ class AppViewModel : ViewModel() {
             )
             firestore.collection("users").document(recipientId)
                 .collection("notifications").document(notifId).set(notification).await()
-        } catch (e: Exception) {
-            Log.e("AppViewModel", "Failed to send notification", e)
-        }
+        } catch (e: Exception) { }
     }
 
     fun loadMyClaims() = viewModelScope.launch {
@@ -755,20 +766,14 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Approves a claim, denies all other pending claims for the same post, and marks post as claimed.
-     */
     fun approveClaim(claimId: String, postId: String, notificationId: String? = null) = viewModelScope.launch {
         try {
-            // 1. Get claim details first
             val claimDoc = firestore.collection("claims").document(claimId).get().await()
             val claimerId = claimDoc.getString("claimerId") ?: ""
             val postTitle = claimDoc.getString("postTitle") ?: "Item"
 
-            // 2. Approve selected claim
             firestore.collection("claims").document(claimId).update("status", "approved").await()
             
-            // 3. Deny all other pending claims for this post (Fraud prevention)
             val otherClaims = firestore.collection("claims")
                 .whereEqualTo("postId", postId)
                 .whereEqualTo("status", "pending")
@@ -778,22 +783,18 @@ class AppViewModel : ViewModel() {
                 if (doc.id != claimId) {
                     val otherClaimerId = doc.getString("claimerId") ?: ""
                     doc.reference.update("status", "denied").await()
-                    // Penalize other false/rejected claims
                     if (otherClaimerId.isNotBlank()) {
                         penalizeFalseClaim(otherClaimerId)
                     }
                 }
             }
             
-            // 4. Mark post as claimed/inactive
             firestore.collection("posts").document(postId).update("status", "claimed").await()
             
-            // 5. Cleanup notification if provided
             if (!notificationId.isNullOrBlank()) {
                 markNotificationAsRead(notificationId)
             }
 
-            // 6. Send approval notification to claimer
             sendNotification(
                 recipientId = claimerId,
                 type = "CLAIM_APPROVED",
@@ -803,10 +804,6 @@ class AppViewModel : ViewModel() {
                 claimId = claimId
             )
 
-            // 7. Increment trust score for the finder (the one who returned the item)
-            // If this was a FOUND item being claimed, the OWNER is the finder? 
-            // Actually, usually: FOUND post created by User B. User A claims it.
-            // If User B (post author) approves User A's claim, User B gets points for returning.
             finalizeReturn(auth.currentUser?.uid ?: "")
 
             loadAllPosts()
@@ -824,11 +821,8 @@ class AppViewModel : ViewModel() {
             val postId = (claimDoc.getString("postId") ?: "")
 
             firestore.collection("claims").document(claimId).update("status", "denied").await()
-            
-            // Penalize for rejected claim
             penalizeFalseClaim(claimerId)
 
-            // Notify claimer
             sendNotification(
                 recipientId = claimerId,
                 type = "CLAIM_REJECTED",
@@ -840,10 +834,9 @@ class AppViewModel : ViewModel() {
 
             markNotificationAsRead(notificationId)
             loadClaimsForMyPosts()
-        } catch (e: Exception) { /* Handle error */ }
+        } catch (e: Exception) { }
     }
 
-    // --- NOTIFICATIONS ---
     fun listenForUnreadNotifications() {
         val userId = auth.currentUser?.uid
         if (userId == null) {
@@ -858,13 +851,8 @@ class AppViewModel : ViewModel() {
             .whereEqualTo("isRead", false)
 
         unreadNotificationListener = query.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.e("Notifications", "Listen failed.", error)
-                return@addSnapshotListener
-            }
-
+            if (error != null) { return@addSnapshotListener }
             if (snapshot != null) {
-                // Manually filter types on client side
                 val count = snapshot.documents.count { doc ->
                     val type = doc.getString("type") ?: ""
                     type in listOf("MESSAGE", "CLAIM", "CLAIM_APPROVED", "CLAIM_REJECTED", "FOUND_REPORT")
@@ -897,7 +885,6 @@ class AppViewModel : ViewModel() {
                 val notifications = snapshot.documents.mapNotNull { doc ->
                     doc.toObject(Notification::class.java)?.copy(id = doc.id)
                 }
-                // Filter notifications to show Chat, Claim and Found types
                 val filtered = notifications.filter { 
                     it.type in listOf("MESSAGE", "CLAIM", "CLAIM_APPROVED", "CLAIM_REJECTED", "FOUND_REPORT")
                 }
@@ -913,9 +900,7 @@ class AppViewModel : ViewModel() {
             firestore.collection("users").document(userId)
                 .collection("notifications").document(notificationId)
                 .update("isRead", true).await()
-        } catch (e: Exception) {
-            Log.e("Notifications", "Failed to mark notification as read", e)
-        }
+        } catch (e: Exception) { }
     }
 
     override fun onCleared() {
@@ -924,12 +909,10 @@ class AppViewModel : ViewModel() {
         allNotificationsListener?.remove()
     }
 
-    // --- MESSAGING ---
     val conversationsState = MutableStateFlow<ConversationsState>(ConversationsState.Loading)
     val messagesState = MutableStateFlow<MessagesState>(MessagesState.Loading)
     val currentConversationId = MutableStateFlow<String?>(null)
 
-    // REWRITTEN: Loads chats using 'whereArrayContains' to match index
     fun loadConversations() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: run { conversationsState.value = ConversationsState.Error("Not logged in"); return@launch }
 
@@ -941,6 +924,9 @@ class AppViewModel : ViewModel() {
                 .await()
 
             val conversations = snapshot.documents.mapNotNull { doc ->
+                val deletedBy = (doc.get("deletedBy") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                if (userId in deletedBy) return@mapNotNull null
+                
                 val participants = (doc.get("participants") as? List<*>)?.filterIsInstance<String>() ?: return@mapNotNull null
                 if (userId !in participants) return@mapNotNull null
                 Conversation(
@@ -954,7 +940,8 @@ class AppViewModel : ViewModel() {
                     participant2Name = doc.getString("participant2Name") ?: "",
                     lastMessage = doc.getString("lastMessage") ?: "",
                     lastMessageTime = doc.getLong("lastMessageTime") ?: 0L,
-                    unreadCount = doc.getLong("unreadCount")?.toInt() ?: 0
+                    unreadCount = doc.getLong("unreadCount")?.toInt() ?: 0,
+                    deletedBy = deletedBy
                 )
             }
 
@@ -980,6 +967,9 @@ class AppViewModel : ViewModel() {
                 }
 
             if (existingConversation != null) {
+                firestore.collection("conversations").document(existingConversation.id)
+                    .update("deletedBy", FieldValue.arrayRemove(userId))
+                
                 callback(Result.success(existingConversation.id))
                 return@launch
             }
@@ -995,7 +985,8 @@ class AppViewModel : ViewModel() {
                 "participants" to listOf(userId, postOwnerId),
                 "lastMessage" to "",
                 "lastMessageTime" to System.currentTimeMillis(),
-                "unreadCount" to 0
+                "unreadCount" to 0,
+                "deletedBy" to emptyList<String>()
             )
             val newConversation = firestore.collection("conversations").add(conversationData).await()
             callback(Result.success(newConversation.id))
@@ -1046,8 +1037,6 @@ class AppViewModel : ViewModel() {
 
         try {
             var imageUrl: String? = null
-            
-            // Step 1: Upload image if present
             if (imageUri != null) {
                 val refPath = "chat_images/$conversationId/${UUID.randomUUID()}.jpg"
                 val ref = storage.reference.child(refPath)
@@ -1065,21 +1054,19 @@ class AppViewModel : ViewModel() {
                 "read" to false
             )
 
-            // 2. Add to main messages collection
             firestore.collection("messages").add(messageData).await()
 
-            // 3. Update the conversation preview
             val lastMsgText = if (imageUrl != null && text.isBlank()) "Sent an image" else text
             firestore.collection("conversations").document(conversationId)
                 .update(
                     mapOf(
                         "lastMessage" to lastMsgText,
-                        "lastMessageTime" to System.currentTimeMillis()
+                        "lastMessageTime" to System.currentTimeMillis(),
+                        "deletedBy" to emptyList<String>()
                     )
                 )
                 .await()
 
-            // 4. Send Notification to recipient
             val conversationDoc = firestore.collection("conversations").document(conversationId).get().await()
             val participant1 = conversationDoc.getString("participant1Id")
             val participant2 = conversationDoc.getString("participant2Id")
@@ -1095,10 +1082,38 @@ class AppViewModel : ViewModel() {
                     conversationId = conversationId
                 )
             }
+        } catch (e: Exception) { }
+    }
 
-        } catch (e: Exception) { 
-            Log.e("AppViewModel", "Send message failed: ${e.message}")
-        }
+    fun deleteMessage(messageId: String) = viewModelScope.launch {
+        try {
+            firestore.collection("messages").document(messageId).delete().await()
+        } catch (e: Exception) { }
+    }
+
+    fun deleteConversation(conversationId: String) = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: return@launch
+        try {
+            firestore.collection("conversations").document(conversationId)
+                .update("deletedBy", FieldValue.arrayUnion(userId))
+                .await()
+            loadConversations()
+        } catch (e: Exception) { }
+    }
+
+    fun clearAllChats() = viewModelScope.launch {
+        val userId = auth.currentUser?.uid ?: return@launch
+        try {
+            val conversations = firestore.collection("conversations")
+                .whereArrayContains("participants", userId)
+                .get()
+                .await()
+
+            for (doc in conversations.documents) {
+                doc.reference.update("deletedBy", FieldValue.arrayUnion(userId))
+            }
+            loadConversations()
+        } catch (e: Exception) { }
     }
 
     fun getUserNameById(userId: String, callback: (String) -> Unit) = viewModelScope.launch {
@@ -1110,7 +1125,6 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    // --- BOOKMARKS ---
     fun toggleBookmark(post: Post) = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: return@launch
         try {
@@ -1130,15 +1144,11 @@ class AppViewModel : ViewModel() {
             } else {
                 firestore.collection("bookmarks").document(q.documents.first().id).delete().await()
             }
-            // Refresh bookmark cache
             loadBookmarks()
             loadBookmarkedPosts()
-        } catch (e: Exception) {
-            // Optionally expose an error channel/snackbar
-        }
+        } catch (e: Exception) { }
     }
 
-    // --- BOOKMARK CACHE LOADER ---
     private fun loadBookmarks() = viewModelScope.launch {
         val userId = auth.currentUser?.uid ?: run { bookmarks.value = emptySet(); return@launch }
         try {

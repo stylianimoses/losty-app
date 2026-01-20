@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import coil.compose.AsyncImage
 import com.fyp.losty.AppViewModel
@@ -93,12 +95,11 @@ fun HomeScreen(appNavController: NavController) {
     val navBackStackEntry by appNavController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination?.route
     val selectedRoute = when {
-        currentDestination == "home" -> "main"
+        currentDestination == "main" -> "home"
         currentDestination == "conversations" -> "chat"
         currentDestination?.startsWith("chat") == true -> "chat"
         currentDestination == "profile" -> "profile"
         currentDestination == "my_activity" -> "my_activity"
-        currentDestination == "manage_active_claims" -> "home"
         else -> "home"
     }
 
@@ -123,12 +124,23 @@ fun HomeScreen(appNavController: NavController) {
         },
         bottomBar = {
             BottomNavigationBar(selectedRoute = selectedRoute, onItemSelected = { route ->
-                when (route) {
-                    "home" -> appNavController.navigate("home")
-                    "chat" -> appNavController.navigate("conversations")
-                    "add" -> appNavController.navigate("create_post")
-                    "my_activity" -> appNavController.navigate("my_activity")
-                    "profile" -> appNavController.navigate("profile")
+                val destination = when(route) {
+                    "home" -> "main"
+                    "chat" -> "conversations"
+                    "add" -> "create_post"
+                    "my_activity" -> "my_activity"
+                    "profile" -> "profile"
+                    else -> route
+                }
+
+                if (currentDestination != destination) {
+                    appNavController.navigate(destination) {
+                        popUpTo(appNavController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             })
         }
@@ -170,7 +182,7 @@ fun HomeScreen(appNavController: NavController) {
                                 "Yesterday" -> isWithinYesterday(it.createdAt)
                                 "Last 7 days" -> isWithinDays(it.createdAt, 7)
                                 "Last 30 days" -> isWithinDays(it.createdAt, 30)
-                                else -> true // Any time
+                                else -> true 
                             }
                             
                             matchesType && matchesSearch && matchesCategory && matchesPeriod
@@ -392,7 +404,7 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
     val isOwner = userProfile.uid == post.authorId
     
     // Dialog states
-    var showClaimDialog by remember { mutableStateOf(false) } // For "This is Mine!"
+    var showClaimDialog by remember { mutableStateOf(false) } 
     var showVerificationTips by remember { mutableStateOf(false) }
     var showFoundReportDialog by remember { mutableStateOf(false) }
     var showFullscreenImage by remember { mutableStateOf(false) }
@@ -401,15 +413,12 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
     var proofImageUri by remember { mutableStateOf<Uri?>(null) }
     var fullscreenImageUri by remember { mutableStateOf<Uri?>(null) }
 
-
-    // Launcher for the GALLERY
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) proofImageUri = uri
     }
 
-    // Launcher for the CAMERA
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -481,7 +490,6 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
             }
             Spacer(modifier = Modifier.height(12.dp))
             
-            // --- TITLE & DESCRIPTION ---
             Text(text = post.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -494,9 +502,23 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
             Spacer(modifier = Modifier.height(12.dp))
             
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { /* TODO: Implement likes */ }) {
-                    Icon(Icons.Filled.Favorite, contentDescription = "Like", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                val isLiked = userProfile.uid in post.likes
+                IconButton(onClick = { appViewModel.toggleLike(post.id) }) {
+                    Icon(
+                        imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = "Like",
+                        tint = if (isLiked) ElectricPink else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+                if (post.likes.isNotEmpty()) {
+                    Text(
+                        text = "${post.likes.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
+
                 IconButton(onClick = {
                     if (creatingConversation) return@IconButton
                     if (post.id.isNotBlank() && post.authorId.isNotBlank()) {
@@ -529,11 +551,10 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 
-                // ACTION BUTTON - Hidden if current user is the owner
                 if (!isOwner && post.status == "active") {
                     if (post.type == "LOST") {
                         Button(
-                            onClick = { showVerificationTips = true }, // Show tips first
+                            onClick = { showVerificationTips = true }, 
                             colors = ButtonDefaults.buttonColors(containerColor = ElectricPink),
                             shape = RoundedCornerShape(8.dp)
                         ) {
@@ -565,20 +586,16 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
         FullscreenImage(uri = fullscreenImageUri!!, onDismiss = { showFullscreenImage = false })
     }
 
-    // --- DIALOGS ---
-
-    // 1. Verification Tips Dialog
     if (showVerificationTips) {
         VerificationTipsDialog(
             onDismiss = { showVerificationTips = false },
             onConfirm = {
                 showVerificationTips = false
-                showFoundReportDialog = true // Open the next dialog
+                showFoundReportDialog = true 
             }
         )
     }
 
-    // 2. Found Item Report Dialog (After tips)
     if (showFoundReportDialog) {
         AlertDialog(
             onDismissRequest = { showFoundReportDialog = false },
@@ -588,7 +605,7 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
                     Text("Provide a brief description to help the owner, and add a photo if possible.")
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = userAnswer, // Reusing userAnswer state
+                        value = userAnswer, 
                         onValueChange = { userAnswer = it },
                         placeholder = { Text("e.g., Found near the library") },
                         modifier = Modifier.fillMaxWidth(),
@@ -644,7 +661,6 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
         )
     }
 
-    // 3. Security Question Dialog (For Claiming a "FOUND" item)
     if (showClaimDialog) {
         AlertDialog(
             onDismissRequest = { showClaimDialog = false },
@@ -748,7 +764,6 @@ private fun PostCard(post: Post, navController: NavController, appViewModel: App
     }
 }
 
-// Helper functions for time filtering
 fun isWithinToday(timestamp: Long): Boolean {
     val now = System.currentTimeMillis()
     val calendar = Calendar.getInstance()

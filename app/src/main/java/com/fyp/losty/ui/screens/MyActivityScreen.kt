@@ -53,6 +53,9 @@ fun MyActivityScreen(
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     val userProfile by appViewModel.userProfile.collectAsState()
+    
+    var showFullscreenImage by remember { mutableStateOf(false) }
+    var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -64,62 +67,95 @@ fun MyActivityScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        Column(modifier = Modifier.padding(paddingValues)) {
-            
-            // Trust Score Section
-            TrustScoreCard(score = userProfile.trustScore)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val postItemsSelected = selectedTab == 0
-                val claimItemsSelected = selectedTab == 1
-                val savedItemsSelected = selectedTab == 2
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.padding(paddingValues)) {
                 
-                Button(
-                    onClick = { selectedTab = 0 },
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (postItemsSelected) ElectricPink else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (postItemsSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // Trust Score Section
+                TrustScoreCard(score = userProfile.trustScore)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Posts", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    val postItemsSelected = selectedTab == 0
+                    val claimItemsSelected = selectedTab == 1
+                    val savedItemsSelected = selectedTab == 2
+                    
+                    Button(
+                        onClick = { selectedTab = 0 },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(0.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (postItemsSelected) ElectricPink else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (postItemsSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text("Posts", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = { selectedTab = 1 },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(0.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (claimItemsSelected) ElectricPink else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (claimItemsSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text("Claims", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = { selectedTab = 2 },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(0.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (savedItemsSelected) ElectricPink else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (savedItemsSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text("Saved", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
-                Button(
-                    onClick = { selectedTab = 1 },
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (claimItemsSelected) ElectricPink else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (claimItemsSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+
+                when (selectedTab) {
+                    0 -> MyPostsTab(appViewModel = appViewModel, navController = navController) { selectedTab = 1 }
+                    1 -> ClaimsTab(
+                        appViewModel = appViewModel, 
+                        navController = navController,
+                        onImageClick = { url ->
+                            fullscreenImageUrl = url
+                            showFullscreenImage = true
+                        }
                     )
-                ) {
-                    Text("Claims", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-                Button(
-                    onClick = { selectedTab = 2 },
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (savedItemsSelected) ElectricPink else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (savedItemsSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) {
-                    Text("Saved", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    2 -> SavedItemsTab(appViewModel = appViewModel, navController = navController)
                 }
             }
 
-            when (selectedTab) {
-                0 -> MyPostsTab(appViewModel = appViewModel, navController = navController) { selectedTab = 1 }
-                1 -> ClaimsTab(appViewModel = appViewModel, navController = navController)
-                2 -> SavedItemsTab(appViewModel = appViewModel, navController = navController)
+            if (showFullscreenImage && fullscreenImageUrl != null) {
+                FullscreenImageOverlay(url = fullscreenImageUrl!!) {
+                    showFullscreenImage = false
+                }
             }
         }
+    }
+}
+
+@Composable
+fun FullscreenImageOverlay(url: String, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.9f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = url,
+            contentDescription = "Fullscreen Image",
+            modifier = Modifier.fillMaxWidth(),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -246,7 +282,8 @@ private fun MyPostItem(post: Post, onDeleteClick: () -> Unit, onEditClick: () ->
 @Composable
 private fun ClaimsTab(
     appViewModel: AppViewModel,
-    navController: NavController
+    navController: NavController,
+    onImageClick: (String) -> Unit
 ) {
     val myClaimsState by appViewModel.myClaimsState.collectAsState()
     val claimsForMyPostsState by appViewModel.claimsForMyPostsState.collectAsState()
@@ -314,6 +351,7 @@ private fun ClaimsTab(
                                 val notification = (appViewModel.notificationState.collectAsState().value as? com.fyp.losty.NotificationState.Success)?.notifications?.find { it.claimId == claim.id }
                                 ClaimApprovalCard(
                                     claim = claim,
+                                    onImageClick = onImageClick,
                                     onApprove = {
                                         coroutineScope.launch {
                                             appViewModel.approveClaim(claim.id, claim.postId, notification?.id ?: "")
@@ -354,7 +392,12 @@ private fun ClaimsTab(
 
                         if (otherClaimsOnMyPosts.isNotEmpty()) {
                             item { Text(text = "Other Claims on My Posts", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.onSurface) }
-                            items(otherClaimsOnMyPosts) { claim -> OwnerClaimCard(claim = claim) }
+                            items(otherClaimsOnMyPosts) { claim -> 
+                                OwnerClaimCard(
+                                    claim = claim,
+                                    onImageClick = onImageClick
+                                ) 
+                            }
                         }
 
                         if (state.claims.isNotEmpty()) {
@@ -480,7 +523,7 @@ private fun SavedPostItem(post: Post, onClick: () -> Unit, onRemoveBookmark: () 
 
 
 @Composable
-fun ClaimApprovalCard(claim: Claim, onApprove: () -> Unit, onReject: () -> Unit) {
+fun ClaimApprovalCard(claim: Claim, onImageClick: (String) -> Unit, onApprove: () -> Unit, onReject: () -> Unit) {
     val score = claim.verificationScore
 
     Card(
@@ -550,7 +593,8 @@ fun ClaimApprovalCard(claim: Claim, onApprove: () -> Unit, onReject: () -> Unit)
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onImageClick(claim.proofImageUrl) },
                     contentScale = ContentScale.Crop
                 )
             }
@@ -581,7 +625,7 @@ fun ClaimApprovalCard(claim: Claim, onApprove: () -> Unit, onReject: () -> Unit)
 }
 
 @Composable
-fun OwnerClaimCard(claim: Claim) {
+fun OwnerClaimCard(claim: Claim, onImageClick: (String) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -597,13 +641,15 @@ fun OwnerClaimCard(claim: Claim) {
                 Text("Answer: ${claim.answer}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (claim.proofImageUrl != null) {
+                Spacer(modifier = Modifier.height(8.dp))
                 AsyncImage(
                     model = claim.proofImageUrl,
                     contentDescription = "Proof Image",
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(100.dp)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onImageClick(claim.proofImageUrl) },
                     contentScale = ContentScale.Crop
                 )
             }

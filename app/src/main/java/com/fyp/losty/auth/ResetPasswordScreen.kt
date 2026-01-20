@@ -57,8 +57,6 @@ fun ResetPasswordScreen(navController: NavController, appViewModel: AppViewModel
                 .fillMaxSize()
                 .padding(16.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier
@@ -68,13 +66,11 @@ fun ResetPasswordScreen(navController: NavController, appViewModel: AppViewModel
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center // Center content vertically
             ) {
-                Text(text = "Reset Password", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
                     text = "Enter the email address associated with your account. We will send you a link to reset your password.",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
 

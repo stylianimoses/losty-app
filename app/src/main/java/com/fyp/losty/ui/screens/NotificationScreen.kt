@@ -8,7 +8,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +30,8 @@ import com.fyp.losty.Notification
 import com.fyp.losty.NotificationState
 import com.fyp.losty.ui.components.BackButton
 import com.fyp.losty.ui.theme.ElectricPink
+import com.fyp.losty.ui.theme.SafetyTeal
+import com.fyp.losty.ui.theme.UrgentRed
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -94,7 +101,7 @@ fun NotificationScreen(
                                         appViewModel.markNotificationAsRead(notification.id)
                                         // Navigate based on type
                                         when (notification.type) {
-                                            "CLAIM", "CLAIM_APPROVED", "CLAIM_REJECTED" -> {
+                                            "CLAIM", "CLAIM_APPROVED", "CLAIM_REJECTED", "FOUND_REPORT" -> {
                                                 navController.navigate("my_activity")
                                             }
                                             "MESSAGE" -> {
@@ -105,7 +112,6 @@ fun NotificationScreen(
                                                 }
                                             }
                                             "MATCH_ALERT" -> {
-                                                // Ideally navigate to specific post if possible, or home for now
                                                 navController.navigate("main")
                                             }
                                             else -> {}
@@ -133,6 +139,22 @@ fun NotificationItem(
     notification: Notification,
     onClick: () -> Unit
 ) {
+    val icon = when (notification.type) {
+        "MESSAGE" -> Icons.AutoMirrored.Filled.Chat
+        "CLAIM", "FOUND_REPORT" -> Icons.Default.Info
+        "CLAIM_APPROVED" -> Icons.Default.CheckCircle
+        "CLAIM_REJECTED" -> Icons.Default.Warning
+        else -> Icons.Default.Notifications
+    }
+
+    val iconColor = when (notification.type) {
+        "MESSAGE" -> ElectricPink
+        "CLAIM", "FOUND_REPORT" -> Color(0xFF2196F3) // Blue
+        "CLAIM_APPROVED" -> SafetyTeal
+        "CLAIM_REJECTED" -> UrgentRed
+        else -> ElectricPink
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -152,13 +174,13 @@ fun NotificationItem(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(if (notification.isRead) MaterialTheme.colorScheme.outline.copy(alpha = 0.2f) else ElectricPink.copy(alpha = 0.2f)),
+                    .background(iconColor.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Notifications,
+                    imageVector = icon,
                     contentDescription = null,
-                    tint = if (notification.isRead) MaterialTheme.colorScheme.outline else ElectricPink,
+                    tint = iconColor,
                     modifier = Modifier.size(20.dp)
                 )
             }

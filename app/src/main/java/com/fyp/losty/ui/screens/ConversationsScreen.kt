@@ -1,13 +1,15 @@
 package com.fyp.losty.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -44,6 +46,9 @@ fun ConversationsScreen(
     val userProfile by appViewModel.userProfile.collectAsState()
     val currentUserId = userProfile.uid
 
+    var searchQuery by remember { mutableStateOf("") }
+    var conversationToDelete by remember { mutableStateOf<Conversation?>(null) }
+
     LaunchedEffect(Unit) {
         appViewModel.loadConversations()
     }
@@ -69,42 +74,61 @@ fun ConversationsScreen(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                Surface(
+                // Search Bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .height(48.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    placeholder = { Text("Search chats or items...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = ElectricPink) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 2.dp
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Search chats...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
-                    }
-                }
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = ElectricPink.copy(alpha = 0.5f)
+                    )
+                )
 
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     when (val state = conversationsState) {
                         is ConversationsState.Loading -> CircularProgressIndicator(color = ElectricPink)
                         is ConversationsState.Success -> {
-                            if (state.conversations.isEmpty()) {
-                                Text("No messages yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val filteredConversations = state.conversations.filter {
+                                val otherUserName = if (currentUserId == it.participant1Id) it.participant2Name else it.participant1Name
+                                otherUserName.contains(searchQuery, ignoreCase = true) || 
+                                it.postTitle.contains(searchQuery, ignoreCase = true)
+                            }
+
+                            if (filteredConversations.isEmpty()) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = if (searchQuery.isEmpty()) "No messages yet" else "No matching chats found",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             } else {
                                 LazyColumn(
                                     modifier = Modifier.fillMaxSize(),
                                     contentPadding = PaddingValues(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    items(state.conversations) { conversation ->
+                                    items(filteredConversations) { conversation ->
                                         ConversationCard(
                                             conversation = conversation,
                                             currentUserId = currentUserId,
-                                            onClick = { navController.navigate("chat/${conversation.id}") }
+                                            onClick = { navController.navigate("chat/${conversation.id}") },
+                                            onLongClick = { conversationToDelete = conversation }
                                         )
                                     }
                                 }
@@ -118,19 +142,50 @@ fun ConversationsScreen(
             PullRefreshIndicator(isRefreshing, pullRefreshState, Modifier.align(Alignment.TopCenter))
         }
     }
+
+    if (conversationToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { conversationToDelete = null },
+            title = { Text("Delete Message History?") },
+            text = { Text("This will permanently delete your chat history with this user. This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        conversationToDelete?.let { appViewModel.deleteConversation(it.id) }
+                        conversationToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConversationCard(
     conversation: Conversation,
     currentUserId: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val otherUserName = if (currentUserId == conversation.participant1Id) conversation.participant2Name else conversation.participant1Name
     val isUnread = conversation.unreadCount > 0
 
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -168,6 +223,16 @@ fun ConversationCard(
                         fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Normal
                     )
                 }
+
+                Spacer(modifier = Modifier.height(2.dp))
+                
+                Text(
+                    text = "Re: ${conversation.postTitle}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
                 Spacer(modifier = Modifier.height(4.dp))
 

@@ -1,9 +1,8 @@
 package com.fyp.losty.ui.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -14,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -29,12 +27,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.fyp.losty.AppViewModel
-import com.fyp.losty.NotificationSettings
 import com.fyp.losty.Post
 import com.fyp.losty.PostFeedState
 import com.fyp.losty.R
@@ -42,6 +39,7 @@ import com.fyp.losty.ui.components.BackButton
 import com.fyp.losty.ui.components.TrustScoreCard
 import com.fyp.losty.ui.theme.UrgentRed
 import com.fyp.losty.ui.theme.SafetyTeal
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,15 +48,40 @@ fun ProfileScreen(
     appViewModel: AppViewModel = viewModel()
 ) {
     val userProfile by appViewModel.userProfile.collectAsState()
-    val isSignedOut by appViewModel.isSignedOut.collectAsState()
     
     val myPostsState by appViewModel.myPostsState.collectAsState()
     val bookmarkedPostsState by appViewModel.bookmarkedPostsState.collectAsState()
 
-    var showSignOutDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
+    var showImageSourceDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    val context = LocalContext.current
+
+    // Image Picker & Camera Launchers
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) appViewModel.updateProfilePicture(uri)
+    }
+
+    var tempImageUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && tempImageUri != null) {
+            appViewModel.updateProfilePicture(tempImageUri!!)
+        }
+    }
+
+    fun createTempUri(): Uri {
+        val tempFile = File.createTempFile("profile_tmp_", ".jpg", context.cacheDir).apply {
+            createNewFile()
+            deleteOnExit()
+        }
+        return FileProvider.getUriForFile(context, "${context.packageName}.provider", tempFile)
+    }
 
     LaunchedEffect(Unit) {
         appViewModel.loadUserProfile()
@@ -66,15 +89,6 @@ fun ProfileScreen(
         appViewModel.loadBookmarkedPosts()
     }
     
-    LaunchedEffect(isSignedOut) {
-        if (isSignedOut) {
-            navController.navigate("auth_graph") {
-                popUpTo("main_graph") { inclusive = true }
-                launchSingleTop = true
-            }
-        }
-    }
-
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -83,9 +97,6 @@ fun ProfileScreen(
                 actions = {
                     IconButton(onClick = { navController.navigate("settings") }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
-                    }
-                    IconButton(onClick = { showSignOutDialog = true }) {
-                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign Out", tint = Color(0xFFE91E63))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -105,20 +116,42 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Profile Picture
-            val painter = if (userProfile.photoUrl.isNotEmpty()) {
-                rememberAsyncImagePainter(userProfile.photoUrl)
-            } else {
-                painterResource(id = R.drawable.outline_account_circle_24)
-            }
-            Image(
-                painter = painter,
-                contentDescription = "Profile Picture",
+            Box(
                 modifier = Modifier
                     .size(120.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Crop
-            )
+                    .clickable { showImageSourceDialog = true },
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                val painter = if (userProfile.photoUrl.isNotEmpty()) {
+                    rememberAsyncImagePainter(userProfile.photoUrl)
+                } else {
+                    painterResource(id = R.drawable.outline_account_circle_24)
+                }
+                Image(
+                    painter = painter,
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentScale = ContentScale.Crop
+                )
+                
+                // Camera Overlay Icon
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape,
+                    modifier = Modifier.size(32.dp),
+                    shadowElevation = 4.dp
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = "Change Picture",
+                        tint = Color.White,
+                        modifier = Modifier.padding(6.dp)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -232,24 +265,6 @@ fun ProfileScreen(
         }
     }
 
-    if (showSignOutDialog) {
-        AlertDialog(
-            onDismissRequest = { showSignOutDialog = false },
-            title = { Text("Sign Out") },
-            text = { Text("Are you sure you want to sign out?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        appViewModel.signOut()
-                        showSignOutDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
-                ) { Text("Sign Out") }
-            },
-            dismissButton = { TextButton(onClick = { showSignOutDialog = false }) { Text("Cancel") } }
-        )
-    }
-
     if (showEditNameDialog) {
         AlertDialog(
             onDismissRequest = { showEditNameDialog = false },
@@ -272,6 +287,37 @@ fun ProfileScreen(
                 ) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showEditNameDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Change Profile Picture") },
+            text = {
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Take Photo") },
+                        leadingContent = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
+                        modifier = Modifier.clickable {
+                            tempImageUri = createTempUri()
+                            cameraLauncher.launch(tempImageUri!!)
+                            showImageSourceDialog = false
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Choose from Gallery") },
+                        leadingContent = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                        modifier = Modifier.clickable {
+                            photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            showImageSourceDialog = false
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showImageSourceDialog = false }) { Text("Cancel") }
+            }
         )
     }
 }

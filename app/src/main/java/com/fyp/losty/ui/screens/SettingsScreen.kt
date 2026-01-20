@@ -11,15 +11,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,7 +40,11 @@ fun SettingsScreen(
 ) {
     val isDarkTheme by appViewModel.isDarkTheme.collectAsState()
     val notificationSettings by appViewModel.notificationSettings.collectAsState()
+    val isSignedOut by appViewModel.isSignedOut.collectAsState()
     val context = LocalContext.current
+    
+    var showClearChatDialog by remember { mutableStateOf(false) }
+    var showSignOutDialog by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -47,6 +52,15 @@ fun SettingsScreen(
             appViewModel.updateNotificationSettings(NotificationSettings(enabled = isGranted))
         }
     )
+
+    LaunchedEffect(isSignedOut) {
+        if (isSignedOut) {
+            navController.navigate("auth_graph") {
+                popUpTo("main_graph") { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -122,7 +136,131 @@ fun SettingsScreen(
                 }
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp), thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Data Management",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            SettingsRow(
+                icon = Icons.Default.Chat,
+                title = "Clear All Chats",
+                description = "Delete all conversations and messages",
+                onClick = { showClearChatDialog = true }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp), thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Account",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            SettingsRow(
+                icon = Icons.AutoMirrored.Filled.ExitToApp,
+                title = "Sign Out",
+                description = "Log out from your account",
+                iconColor = Color(0xFFE91E63),
+                onClick = { showSignOutDialog = true }
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+        }
+    }
+
+    if (showClearChatDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearChatDialog = false },
+            title = { Text("Clear All Chats?") },
+            text = { Text("This will permanently delete all your conversations and messages. This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        appViewModel.clearAllChats()
+                        showClearChatDialog = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                ) {
+                    Text("Clear All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearChatDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showSignOutDialog) {
+        AlertDialog(
+            onDismissRequest = { showSignOutDialog = false },
+            title = { Text("Sign Out") },
+            text = { Text("Are you sure you want to sign out?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        appViewModel.signOut()
+                        showSignOutDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+                ) { Text("Sign Out") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun SettingsRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    description: String? = null,
+    iconColor: Color = MaterialTheme.colorScheme.primary,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .clickable { onClick() },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column {
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            if (description != null) {
+                Text(
+                    text = description,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    lineHeight = 16.sp
+                )
+            }
         }
     }
 }
